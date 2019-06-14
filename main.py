@@ -35,19 +35,19 @@ resize_low = 75
 sentence_vector_size = 300
 
 # size of compressed text encoding
-compress_size = 64
+compress_size = 300
 
 # text encoding interpolation
 beta = 0.5
 
 # number of channels of the largest convolution
-convolution_channel = [32, 64, 128, 256]
+convolution_channel = [128, 256, 512, 1024]
 
-noise_size = 64
+noise_size = 100
 g_input_size = noise_size + compress_size
-d_final_size = 64
-learning_rate = 0.001
-epoch = 1
+d_final_size = 128
+learning_rate = 0.0005
+epoch = 10
 
 # ADAM solver
 first_momentum = 0.5
@@ -288,7 +288,7 @@ class Generator(nn.Module):
         )
 
         # compress text encoding first
-        self.compress = nn.Sequential(
+        self.compress = nn.Identity(
             nn.Linear(sentence_vector_size, compress_size),
             nn.LeakyReLU(0.2, inplace=True)
         )
@@ -335,7 +335,7 @@ class Discriminator(nn.Module):
         )
 
         # compress text encoding first
-        self.compress = nn.Sequential(
+        self.compress = nn.Identity(
             nn.Linear(sentence_vector_size, compress_size),
             nn.ReLU(True)
         )
