@@ -14,4 +14,10 @@ text_model = fastText.load_model(text_model_path)
 image_ids = get_one_person_image_ids(coco_keypoint)
 
 # try a caption
-plot_caption(get_one_random_caption(coco_caption, image_ids), text_model, generator_path, device, skeleton)
+image_id, caption = get_one_random_image_id_with_caption(coco_caption, image_ids)
+plot_caption(caption, text_model, generator_path, device, skeleton)
+
+# try the discriminator
+heatmap = get_heatmap(coco_keypoint, image_id)
+discriminate(normalized_random_view_tensor(heatmap), caption, text_model, generator_path, discriminator_path, device,
+             skeleton)
