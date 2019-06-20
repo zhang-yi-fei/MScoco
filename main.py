@@ -501,7 +501,7 @@ if __name__ == '__main__':
                 score_fake = net_d(heatmap_fake.detach(), text_match)
 
                 # calculate losses
-                loss_d = -torch.mean(
+                loss_d = torch.mean(
                     torch.log(score_right) + (torch.log(1 - score_wrong) + torch.log(1 - score_fake)) * 0.5)
 
                 # update
@@ -536,7 +536,7 @@ if __name__ == '__main__':
             score_interpolated = net_d(heatmap_interpolated, text_interpolated)
 
             # calculate losses
-            loss_g = -torch.mean(torch.log(score_fake) + torch.log(score_interpolated))
+            loss_g = torch.mean(torch.log(score_fake) + torch.log(score_interpolated))
 
             # update
             loss_g.backward()
