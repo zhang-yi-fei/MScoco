@@ -1,4 +1,6 @@
-from main import *
+from model import *
+from pycocotools.coco import COCO
+import fastText
 
 # read captions and keypoints from files
 coco_caption = COCO(caption_path)
