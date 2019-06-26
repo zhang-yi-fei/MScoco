@@ -13,34 +13,33 @@ image_folder = '/media/data/yzhang2/coco/train/coco/images/'
 caption_path = '/media/data/yzhang2/coco/train/coco/annotations/captions_train2017.json'
 keypoint_path = '/media/data/yzhang2/coco/train/coco/annotations/person_keypoints_train2017.json'
 text_model_path = '/media/data/yzhang2/wiki.en/wiki.en.bin'
-batch_size = 128
 total_keypoints = 17
 
 # ground truth size in heatmap
-sigma = 5
+sigma = 3
 
 # size of heatmap input to network
-heatmap_size = 128
+heatmap_size = 64
 
 # resized heatmap size
-resize_high = 150
-resize_low = 130
+resize_high = 80
+resize_low = 70
 
 # size of text encoding
 sentence_vector_size = 300
 
 # size of compressed text encoding
-compress_size = 256
+compress_size = 128
 
 # text encoding interpolation
 beta = 0.5
 
-# number of channels of the largest convolution
-convolution_channel = [32, 64, 128, 256, 512]
+# numbers of channels of the convolutions
+convolution_channel = [64, 128, 256, 512]
 
-noise_size = 128
+noise_size = 100
 g_input_size = noise_size + compress_size
-d_final_size = 256
+d_final_size = convolution_channel[-1]
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -290,27 +289,23 @@ class Generator(nn.Module):
 
         # several layers of transposed convolution, batch normalization and ReLu
         self.main = nn.Sequential(
-            nn.ConvTranspose2d(g_input_size, convolution_channel[-1], 4, 1, 0, bias=False),
+            nn.ConvTranspose2d(g_input_size, convolution_channel[-1], 4, 1, 0, bias=True),
             nn.BatchNorm2d(convolution_channel[-1]),
             nn.ReLU(True),
 
-            nn.ConvTranspose2d(convolution_channel[-1], convolution_channel[-2], 4, 2, 1, bias=False),
+            nn.ConvTranspose2d(convolution_channel[-1], convolution_channel[-2], 4, 2, 1, bias=True),
             nn.BatchNorm2d(convolution_channel[-2]),
             nn.ReLU(True),
 
-            nn.ConvTranspose2d(convolution_channel[-2], convolution_channel[-3], 4, 2, 1, bias=False),
+            nn.ConvTranspose2d(convolution_channel[-2], convolution_channel[-3], 4, 2, 1, bias=True),
             nn.BatchNorm2d(convolution_channel[-3]),
             nn.ReLU(True),
 
-            nn.ConvTranspose2d(convolution_channel[-3], convolution_channel[-4], 4, 2, 1, bias=False),
+            nn.ConvTranspose2d(convolution_channel[-3], convolution_channel[-4], 4, 2, 1, bias=True),
             nn.BatchNorm2d(convolution_channel[-4]),
             nn.ReLU(True),
 
-            nn.ConvTranspose2d(convolution_channel[-4], convolution_channel[-5], 4, 2, 1, bias=False),
-            nn.BatchNorm2d(convolution_channel[-5]),
-            nn.ReLU(True),
-
-            nn.ConvTranspose2d(convolution_channel[-5], total_keypoints, 4, 2, 1, bias=False),
+            nn.ConvTranspose2d(convolution_channel[-4], total_keypoints, 4, 2, 1, bias=True),
             nn.Tanh()
 
         )
@@ -318,6 +313,7 @@ class Generator(nn.Module):
         # compress text encoding first
         self.compress = nn.Sequential(
             nn.Linear(sentence_vector_size, compress_size),
+            nn.BatchNorm1d(compress_size),
             nn.LeakyReLU(0.2, inplace=True)
         )
 
@@ -336,40 +332,38 @@ class Discriminator(nn.Module):
 
         # several layers of convolution, batch normalization and leaky ReLu
         self.main = nn.Sequential(
-            nn.Conv2d(total_keypoints, convolution_channel[0], 4, 2, 1, bias=False),
+            nn.Conv2d(total_keypoints, convolution_channel[0], 4, 2, 1, bias=True),
             nn.BatchNorm2d(convolution_channel[0]),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(convolution_channel[0], convolution_channel[1], 4, 2, 1, bias=False),
+            nn.Conv2d(convolution_channel[0], convolution_channel[1], 4, 2, 1, bias=True),
             nn.BatchNorm2d(convolution_channel[1]),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(convolution_channel[1], convolution_channel[2], 4, 2, 1, bias=False),
+            nn.Conv2d(convolution_channel[1], convolution_channel[2], 4, 2, 1, bias=True),
             nn.BatchNorm2d(convolution_channel[2]),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(convolution_channel[2], convolution_channel[3], 4, 2, 1, bias=False),
+            nn.Conv2d(convolution_channel[2], convolution_channel[3], 4, 2, 1, bias=True),
             nn.BatchNorm2d(convolution_channel[3]),
-            nn.LeakyReLU(0.2, inplace=True),
-
-            nn.Conv2d(convolution_channel[3], convolution_channel[4], 4, 2, 1, bias=False),
-            nn.BatchNorm2d(convolution_channel[4]),
-            nn.LeakyReLU(0.2, inplace=True),
+            nn.LeakyReLU(0.2, inplace=True)
 
         )
 
         # compute final score of the discriminator with concatenated sentence vector
         self.second = nn.Sequential(
-            nn.Conv2d(convolution_channel[4] + compress_size, d_final_size, 1, bias=False),
-            nn.ReLU(d_final_size),
-            nn.Conv2d(d_final_size, 1, 4, bias=False),
+            nn.Conv2d(convolution_channel[3] + compress_size, d_final_size, 1, bias=True),
+            nn.BatchNorm2d(d_final_size),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(d_final_size, 1, 4, bias=True),
             nn.Sigmoid()
         )
 
         # compress text encoding first
         self.compress = nn.Sequential(
             nn.Linear(sentence_vector_size, compress_size),
-            nn.ReLU(True)
+            nn.BatchNorm1d(compress_size),
+            nn.LeakyReLU(0.2, inplace=True)
         )
 
     def forward(self, input_heamap, sentence_vector):
@@ -388,12 +382,13 @@ def weights_init(m):
     classname = m.__class__.__name__
     if classname.find('Conv') != -1:
         nn.init.normal_(m.weight.data, 0.0, 0.02)
+        nn.init.constant_(m.bias.data, 0.0)
     elif classname.find('BatchNorm') != -1:
         nn.init.normal_(m.weight.data, 1.0, 0.02)
-        nn.init.normal_(m.bias.data, 0.0, 0.02)
+        nn.init.constant_(m.bias.data, 0.0)
     elif classname.find('Linear') != -1:
         nn.init.kaiming_normal_(m.weight.data)
-        nn.init.normal_(m.bias.data, 0.0, 0.02)
+        nn.init.constant_(m.bias.data, 0.0)
 
 
 # using trained generator, give a caption, plot a generated heatmap

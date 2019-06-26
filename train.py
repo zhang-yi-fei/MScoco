@@ -5,16 +5,17 @@ import fastText
 from datetime import datetime
 
 # training parameters
+batch_size = 64
 learning_rate_g = 0.00005
 learning_rate_d = 0.00005
-epoch = 36
+epoch = 60
 
 # ADAM solver
 first_momentum = 0.5
 second_momentum = 0.999
 
 # how often to visualize
-plot_cycle = 30
+plot_cycle = 100
 
 # read captions and keypoints from files
 coco_caption = COCO(caption_path)
