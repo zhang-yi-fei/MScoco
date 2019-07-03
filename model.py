@@ -7,8 +7,8 @@ import matplotlib.pyplot as plt
 from skimage import io
 from scipy import ndimage
 
-generator_path = './generator.pt'
-discriminator_path = './discriminator.pt'
+generator_path = 'generator'
+discriminator_path = 'discriminator'
 image_folder = '/media/data/yzhang2/coco/train/coco/images/'
 caption_path = '/media/data/yzhang2/coco/train/coco/annotations/captions_train2017.json'
 keypoint_path = '/media/data/yzhang2/coco/train/coco/annotations/person_keypoints_train2017.json'
@@ -16,20 +16,20 @@ text_model_path = '/media/data/yzhang2/wiki.en/wiki.en.bin'
 total_keypoints = 17
 
 # ground truth size in heatmap
-sigma = 3
+sigma = 4
 
 # size of heatmap input to network
 heatmap_size = 64
 
 # resized heatmap size
-resize_high = 80
-resize_low = 70
+resize_high = 100
+resize_low = 80
 
 # size of text encoding
 sentence_vector_size = 300
 
 # size of compressed text encoding
-compress_size = 128
+compress_size = 300
 
 # text encoding interpolation
 beta = 0.5
@@ -311,16 +311,18 @@ class Generator(nn.Module):
         )
 
         # compress text encoding first
-        self.compress = nn.Sequential(
-            nn.Linear(sentence_vector_size, compress_size),
-            nn.BatchNorm1d(compress_size),
-            nn.LeakyReLU(0.2, inplace=True)
-        )
+        # self.compress = nn.Identity(
+        #     nn.Linear(sentence_vector_size, compress_size),
+        #     nn.BatchNorm1d(compress_size),
+        #     nn.LeakyReLU(0.2, inplace=True)
+        # )
+        self.compress = nn.Identity()
 
     def forward(self, noise_vector, sentence_vector):
         # concatenate noise vector and compressed sentence vector
         input_vector = torch.cat((noise_vector, (
             (self.compress(sentence_vector.view(-1, sentence_vector_size))).view(-1, compress_size, 1, 1))), 1)
+        # input_vector = noise_vector
 
         return self.main(input_vector)
 
@@ -360,19 +362,21 @@ class Discriminator(nn.Module):
         )
 
         # compress text encoding first
-        self.compress = nn.Sequential(
-            nn.Linear(sentence_vector_size, compress_size),
-            nn.BatchNorm1d(compress_size),
-            nn.LeakyReLU(0.2, inplace=True)
-        )
+        # self.compress = nn.Sequential(
+        #     nn.Linear(sentence_vector_size, compress_size),
+        #     nn.BatchNorm1d(compress_size),
+        #     nn.LeakyReLU(0.2, inplace=True)
+        # )
+        self.compress = nn.Identity()
 
-    def forward(self, input_heamap, sentence_vector):
+    def forward(self, input_heatmap, sentence_vector):
         # first transposed convolution, then sentence vector
-        tensor = torch.cat((self.main(input_heamap), (
+        tensor = torch.cat((self.main(input_heatmap), (
             (self.compress(sentence_vector.view(-1, sentence_vector_size))).view(-1, compress_size, 1, 1)).repeat(1, 1,
                                                                                                                   4,
                                                                                                                   4)),
                            1)
+        # tensor = self.main(input_heatmap)
 
         return self.second(tensor)
 

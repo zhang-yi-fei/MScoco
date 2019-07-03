@@ -2,6 +2,9 @@ from model import *
 from pycocotools.coco import COCO
 import fastText
 
+generator_path = 'no compression 2/generator'
+discriminator_path = 'no compression 2/discriminator'
+
 # read captions and keypoints from files
 coco_caption = COCO(caption_path)
 coco_keypoint = COCO(keypoint_path)
@@ -17,9 +20,9 @@ image_ids = get_one_person_image_ids(coco_keypoint)
 
 # try a caption
 image_id, caption = get_one_random_image_id_with_caption(coco_caption, image_ids)
-plot_caption(caption, text_model, generator_path, device, skeleton)
+plot_caption(caption, text_model, generator_path + '', device, skeleton)
 
 # try the discriminator
 heatmap = get_heatmap(coco_keypoint, image_id)
-discriminate(normalized_random_view_tensor(heatmap), caption, text_model, generator_path, discriminator_path, device,
-             skeleton)
+discriminate(normalized_random_view_tensor(heatmap), caption, text_model, generator_path + '',
+             discriminator_path + '', device, skeleton)

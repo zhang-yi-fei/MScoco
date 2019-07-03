@@ -6,16 +6,13 @@ from datetime import datetime
 
 # training parameters
 batch_size = 64
-learning_rate_g = 0.00005
-learning_rate_d = 0.00005
-epoch = 60
+learning_rate_g = 0.0002
+learning_rate_d = 0.0002
+epoch = 200
 
 # ADAM solver
 first_momentum = 0.5
 second_momentum = 0.999
-
-# how often to visualize
-plot_cycle = 100
 
 # read captions and keypoints from files
 coco_caption = COCO(caption_path)
@@ -33,12 +30,6 @@ image_ids = get_one_person_image_ids(coco_keypoint)
 # data loader, containing image ids
 image_loader = torch.utils.data.DataLoader(image_ids, batch_size=batch_size, shuffle=True)
 
-# one example to visualize
-example_caption = 'A little boy is playing Wii in front of a chair.'
-example_vector = torch.tensor(text_model.get_sentence_vector(example_caption), dtype=torch.float32, device=device).view(
-    1, sentence_vector_size, 1, 1)
-example_noise = torch.randn(1, noise_size, 1, 1, device=device)
-
 net_g = Generator()
 net_d = Discriminator()
 net_g.to(device)
@@ -49,13 +40,14 @@ optimizer_g = optim.Adam(net_g.parameters(), lr=learning_rate_g, betas=(first_mo
 optimizer_d = optim.Adam(net_d.parameters(), lr=learning_rate_d, betas=(first_momentum, second_momentum))
 criterion = nn.BCELoss()
 
-# visualize example first
-with torch.no_grad():
-    net_g.eval()
-    heatmap = np.array(net_g(example_noise, example_vector).squeeze().tolist()) * 0.5 + 0.5
-    plt.ion()
-    figure, heatmap_plot, skeleton_plot = plot_heatmap(heatmap, skeleton=skeleton, caption=example_caption)
-    net_g.train()
+batch_score_right = 0
+batch_score_wrong = 0
+batch_score_fake = 0
+batch_score_interpolated = 0
+epoch_score_right = []
+epoch_score_wrong = []
+epoch_score_fake = []
+epoch_score_interpolated = []
 
 # train
 print(datetime.now())
@@ -63,14 +55,15 @@ print('training')
 net_g.train()
 net_d.train()
 
-j = 0
 for e in range(epoch):
+    batch_score_right = 0
+    batch_score_wrong = 0
+    batch_score_fake = 0
+    batch_score_interpolated = 0
 
     # number of batches
     batch = len(image_loader)
     for i, data in enumerate(image_loader, 0):
-        j = j + 1
-
         # get heatmaps, sentence vectors and noises
         heatmap_real, text_match = get_random_view_and_caption_tensor(coco_keypoint, coco_caption, text_model, data)
         text_mismatch = get_random_caption_tensor(coco_caption, text_model, data)
@@ -85,51 +78,104 @@ for e in range(epoch):
         noise = noise.to(device)
         noise2 = noise2.to(device)
 
-        # optimize
+        # first, optimize discriminator
         net_d.zero_grad()
-        net_g.zero_grad()
 
         # generate heatmaps
         heatmap_fake = net_g(noise, text_match)
-        heatmap_interpolated = net_g(noise2, text_interpolated)
 
         # discriminate heatmpap-text pairs
         score_right = net_d(heatmap_real, text_match).view(-1)
         score_wrong = net_d(heatmap_real, text_mismatch).view(-1)
         score_fake = net_d(heatmap_fake.detach(), text_match).view(-1)
-        score_fake_to_back = net_d(heatmap_fake, text_match).view(-1)
-        score_interpolated = net_d(heatmap_interpolated, text_interpolated).view(-1)
 
         label_real = torch.full((data.size(0),), 1, device=device)
         label_fake = torch.full((data.size(0),), 0, device=device)
 
-        # calculate losses
+        # calculate losses and update
         criterion(score_right, label_real).backward()
-        criterion(score_wrong, label_fake).backward()
-        criterion(score_fake, label_fake).backward()
+        criterion(score_wrong, label_fake).mul(0.5).backward()
+        criterion(score_fake, label_fake).mul(0.5).backward()
         optimizer_d.step()
-        criterion(score_fake_to_back, label_real).backward()
+
+        # second, optimize generator
+        net_g.zero_grad()
+
+        # generate heatmaps
+        heatmap_interpolated = net_g(noise2, text_interpolated)
+
+        # discriminate heatmpap-text pairs
+        score_fake = net_d(heatmap_fake, text_match).view(-1)
+        score_interpolated = net_d(heatmap_interpolated, text_interpolated).view(-1)
+
+        # calculate losses and update
+        criterion(score_fake, label_real).backward()
         criterion(score_interpolated, label_real).backward()
         optimizer_g.step()
-        # update
 
         # print progress
+        mean_score_right = score_right.mean().item()
+        mean_score_wrong = score_wrong.mean().item()
+        mean_score_fake = score_fake.mean().item()
+        mean_score_interpolated = score_interpolated.mean().item()
         print('epoch ' + str(e + 1) + ' of ' + str(epoch) + ' batch ' + str(i + 1) + ' of ' + str(
-            batch) + ' score_right: ' + str(score_right.mean().item()) + ' score_wrong: ' + str(
-            score_wrong.mean().item()) + ' score_fake: ' + str(
-            score_fake.mean().item()) + ' score_interpolated: ' + str(score_interpolated.mean().item()))
+            batch) + ' score_right: ' + str(mean_score_right) + ' score_wrong: ' + str(
+            mean_score_wrong) + ' score_fake: ' + str(mean_score_fake) + ' score_interpolated: ' + str(
+            mean_score_interpolated))
 
-        # visualize example
-        if j % plot_cycle == 0:
-            with torch.no_grad():
-                net_g.eval()
-                heatmap = np.array(net_g(example_noise, example_vector).squeeze().tolist()) * 0.5 + 0.5
-                plot_heatmap_redraw(heatmap, figure, heatmap_plot, skeleton_plot, skeleton=skeleton)
-                net_g.train()
+        # record scores
+        batch_score_right = batch_score_right + mean_score_right
+        batch_score_wrong = batch_score_wrong + mean_score_wrong
+        batch_score_fake = batch_score_fake + mean_score_fake
+        batch_score_interpolated = batch_score_interpolated + mean_score_interpolated
+
+    # record scores
+    epoch_score_right.append(batch_score_right / batch)
+    epoch_score_wrong.append(batch_score_wrong / batch)
+    epoch_score_fake.append(batch_score_fake / batch)
+    epoch_score_interpolated.append(batch_score_interpolated / batch)
 
     # save models
-    torch.save(net_g.state_dict(), generator_path)
-    torch.save(net_d.state_dict(), discriminator_path)
+    torch.save(net_g.state_dict(), generator_path + '_' + str(e + 1))
+    torch.save(net_d.state_dict(), discriminator_path + '_' + str(e + 1))
 
 print('\nfinished')
 print(datetime.now())
+
+# save models
+torch.save(net_g.state_dict(), generator_path)
+torch.save(net_d.state_dict(), discriminator_path)
+
+# traces of scores
+plt.plot(epoch_score_right)
+plt.xlabel('epoch')
+plt.ylabel('score')
+plt.title('matching')
+plt.savefig('Figure_1.png')
+plt.close()
+
+plt.plot(epoch_score_wrong)
+plt.xlabel('epoch')
+plt.ylabel('score')
+plt.title('mismatching')
+plt.savefig('Figure_2.png')
+plt.close()
+
+plt.plot(epoch_score_fake)
+plt.xlabel('epoch')
+plt.ylabel('score')
+plt.title('generated')
+plt.savefig('Figure_3.png')
+plt.close()
+
+plt.plot(epoch_score_interpolated)
+plt.xlabel('epoch')
+plt.ylabel('score')
+plt.title('generated (interpolated)')
+plt.savefig('Figure_4.png')
+plt.close()
+
+torch.save(epoch_score_right, 'epoch_score_right')
+torch.save(epoch_score_wrong, 'epoch_score_wrong')
+torch.save(epoch_score_fake, 'epoch_score_fake')
+torch.save(epoch_score_interpolated, 'epoch_score_interpolated')
