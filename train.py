@@ -22,7 +22,7 @@ coco_caption = COCO(caption_path)
 coco_keypoint = COCO(keypoint_path)
 
 # keypoint connections (skeleton) from annotation file
-skeleton = np.array(coco_keypoint.loadCats(coco_keypoint.getCatIds())[0]['skeleton']) - 1
+skeleton = np.array(coco_keypoint.loadCats(coco_keypoint.getCatIds())[0].get('skeleton')) - 1
 
 # load text encoding model
 # text_model = fastText.load_model(text_model_path)

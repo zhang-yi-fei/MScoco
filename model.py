@@ -79,7 +79,6 @@ def get_heatmap(data):
     v = keypoint.get('keypoints')[2::3]
 
     for i in range(c):
-
         # labeled keypoints' v > 0
         if v[i] > 0:
             # # ground truth in heatmap is normal distribution shaped
@@ -221,8 +220,8 @@ class HeatmapDataset(torch.utils.data.Dataset):
 
                         # add sentence encoding
                         if text_model is not None:
-                            data['vector'] = [text_model.get_sentence_vector(caption['caption'].replace('\n', '')) for
-                                              caption in captions]
+                            data['vector'] = [text_model.get_sentence_vector(caption.get('caption').replace('\n', ''))
+                                              for caption in captions]
                         self.dataset.append(data)
 
             # no person limit
@@ -239,8 +238,8 @@ class HeatmapDataset(torch.utils.data.Dataset):
 
                         # add sentence encoding
                         if text_model is not None:
-                            data['vector'] = [text_model.get_sentence_vector(caption['caption'].replace('\n', '')) for
-                                              caption in captions]
+                            data['vector'] = [text_model.get_sentence_vector(caption.get('caption').replace('\n', ''))
+                                              for caption in captions]
                         self.dataset.append(data)
 
     def __len__(self):
