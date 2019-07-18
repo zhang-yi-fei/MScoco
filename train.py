@@ -9,8 +9,8 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 # training parameters
 batch_size = 128
-learning_rate_g = 0.0002
-learning_rate_d = 0.0002
+learning_rate_g = 0.0001
+learning_rate_d = 0.0001
 epoch = 500
 
 # ADAM solver

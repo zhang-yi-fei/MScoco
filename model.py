@@ -52,7 +52,8 @@ zero = np.zeros([size, size], dtype='float32')
 x_grid = np.repeat(np.array([range(heatmap_size)]), heatmap_size, axis=0)
 y_grid = np.repeat(np.array([range(heatmap_size)]).transpose(), heatmap_size, axis=1)
 empty = np.zeros([heatmap_size, heatmap_size], dtype='float32')
-testmap = np.exp(-((x_grid - heatmap_size / 2) ** 2 + (y_grid - heatmap_size / 2) ** 2) / sigma ** 2, dtype='float32')
+testmap = np.array([np.exp(-((x_grid - 3 * i) ** 2 + (y_grid - 3 * i) ** 2) / sigma ** 2, dtype='float32') for i in
+                    range(total_keypoints)])
 
 # to decide whether a keypoint is in the heatmap
 heatmap_threshold = 0.5
@@ -71,7 +72,7 @@ def get_heatmap(data):
     h = image.get('height')
     w = image.get('width')
     c = total_keypoints
-    heatmap = []
+    heatmap = np.empty((c, h, w))
 
     # keypoints location (x, y) and visibility (v)
     x = keypoint.get('keypoints')[0::3]
@@ -82,11 +83,11 @@ def get_heatmap(data):
         # labeled keypoints' v > 0
         if v[i] > 0:
             # # ground truth in heatmap is normal distribution shaped
-            heatmap.append(normal[(center - y[i]):(center - y[i] + h), (center - x[i]):(center - x[i] + w)].copy())
+            heatmap[i] = normal[(center - y[i]):(center - y[i] + h), (center - x[i]):(center - x[i] + w)].copy()
         else:
-            heatmap.append(zero[0:h, 0:w].copy())
+            heatmap[i] = zero[0:h, 0:w].copy()
 
-    return np.array(heatmap)
+    return heatmap
 
 
 # return ground truth heat map of a training image (fixed-sized square-shaped)
@@ -94,7 +95,7 @@ def get_heatmap2(keypoint):
     # heatmap size is (number of keypoints)*(bounding box height)*(bounding box width)
     x0, y0, w, h = tuple(keypoint.get('bbox'))
     c = total_keypoints
-    heatmap = []
+    heatmap = np.empty((c, heatmap_size, heatmap_size))
 
     # keypoints location (x, y) and visibility (v)
     x = np.array(keypoint.get('keypoints')[0::3])
@@ -113,12 +114,12 @@ def get_heatmap2(keypoint):
         # labeled keypoints' v > 0
         if v[i] > 0:
             # ground truth in heatmap is normal distribution shaped
-            heatmap.append(np.exp(-((x_grid - x[i]) ** 2 + (y_grid - y[i]) ** 2) / sigma ** 2, dtype='float32'))
+            heatmap[i] = np.exp(-((x_grid - x[i]) ** 2 + (y_grid - y[i]) ** 2) / sigma ** 2, dtype='float32')
         else:
-            heatmap.append(empty.copy())
-        # heatmap.append(testmap.copy())
+            heatmap[i] = empty.copy()
+    # heatmap = testmap.copy()
 
-    return np.array(heatmap)
+    return heatmap
 
 
 # plot a heatmap
@@ -139,8 +140,15 @@ def plot_heatmap(heatmap, skeleton=None, image_path=None, caption=None):
                 y_skeleton[1, -1], x_skeleton[1, -1] = np.unravel_index(np.argmax(heatmap[line[1]], axis=None),
                                                                         heatmap[line[1]].shape)
 
+    # locate the keypoints (the maximum of each channel)
+    keypoint = np.empty((2, total_keypoints))
+    heatmap_max = np.amax(np.amax(heatmap, axis=1), axis=1)
+    keypoint[0] = np.argmax(np.amax(heatmap, axis=1), axis=1)
+    keypoint[1] = np.argmax(np.amax(heatmap, axis=2), axis=1)
+    keypoint = keypoint[:, heatmap_max > heatmap_threshold]
+
     # get a heatmap in single image
-    heatmap = np.max(heatmap, axis=0)
+    heatmap = np.amax(heatmap, axis=0)
     plt.figure()
 
     # plot the heatmap in black-white and the optional training image
@@ -149,6 +157,7 @@ def plot_heatmap(heatmap, skeleton=None, image_path=None, caption=None):
         plt.subplot(1, 2, 1)
         plt.imshow(heatmap, 'gray', vmin=0.0, vmax=1.0)
         plt.plot(x_skeleton, y_skeleton, 'red', linewidth=2)
+        plt.plot(keypoint[0], keypoint[1], 'og', markersize=4)
         plt.title('stacked heatmaps' + (' and skeleton' if skeleton is not None else ''))
         plt.xlabel(caption)
         plt.subplot(1, 2, 2)
@@ -157,6 +166,7 @@ def plot_heatmap(heatmap, skeleton=None, image_path=None, caption=None):
     else:
         plt.imshow(heatmap, 'gray', vmin=0.0, vmax=1.0)
         plt.plot(x_skeleton, y_skeleton, 'red', linewidth=2)
+        plt.plot(keypoint[0], keypoint[1], 'og', markersize=4)
         plt.title('stacked heatmaps' + (' and skeleton' if skeleton is not None else ''))
         plt.xlabel(caption)
 
