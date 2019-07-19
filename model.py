@@ -196,9 +196,9 @@ def augmented_heatmap(heatmap):
 
 # get a batch of noise vectors
 def get_noise_tensor(number):
-    noise_tensor = torch.empty((number, noise_size, 1, 1))
+    noise_tensor = torch.empty((number, noise_size, 1, 1), dtype=torch.float32)
     for i in range(number):
-        noise_tensor[i] = torch.randn(noise_size, 1, 1)
+        noise_tensor[i] = torch.randn((noise_size, 1, 1), dtype=torch.float32)
     return noise_tensor
 
 
@@ -268,7 +268,7 @@ class HeatmapDataset(torch.utils.data.Dataset):
 
     # get a batch of random caption sentence vectors from the whole dataset
     def get_random_caption_tensor(self, number):
-        vector_tensor = torch.empty((number, sentence_vector_size))
+        vector_tensor = torch.empty((number, sentence_vector_size), dtype=torch.float32)
 
         for i in range(number):
             # randomly select from all captions
@@ -279,7 +279,7 @@ class HeatmapDataset(torch.utils.data.Dataset):
 
     # get a batch of random interpolated caption sentence vectors from the whole dataset
     def get_interpolated_caption_tensor(self, number):
-        vector_tensor = torch.empty((number, sentence_vector_size))
+        vector_tensor = torch.empty((number, sentence_vector_size), dtype=torch.float32)
 
         for i in range(number):
             # randomly select 2 captions from all captions
@@ -411,111 +411,39 @@ def weights_init(m):
     #     nn.init.constant_(m.bias.data, 0.0)
 
 
-# using trained generator, give a caption, plot a generated heatmap
-def plot_caption(caption, text_model, generator_path, device, skeleton=None):
-    # load generator model
-    net_g = Generator()
-    net_g.load_state_dict(torch.load(generator_path))
-    net_g.to(device)
-    net_g.eval()
+# a GAN model
+class GAN(object):
+    def __init__(self, generator_path, discriminator_path, device=torch.device('cpu')):
+        # load generator and discriminator models
+        self.net_g = Generator()
+        self.net_d = Discriminator()
+        self.net_g.load_state_dict(torch.load(generator_path))
+        self.net_d.load_state_dict(torch.load(discriminator_path))
+        self.device = device
+        self.net_g.to(self.device)
+        self.net_d.to(self.device)
+        self.net_g.eval()
+        self.net_d.eval()
 
-    # sentence and noise vector as input to the generator
-    sentence_vector = torch.tensor(text_model.get_sentence_vector(caption), dtype=torch.float32,
-                                   device=device).view(1, sentence_vector_size, 1, 1)
-    noise_vector = torch.randn(1, noise_size, 1, 1, device=device)
+    # generate a heatmap from noise
+    def generate(self, noise=None):
+        if noise is None:
+            noise = torch.randn(noise_size, dtype=torch.float32)
+        noise_vector = noise.view(1, noise_size, 1, 1).to(self.device)
 
-    # generate
-    with torch.no_grad():
-        heatmap = net_g(noise_vector)
+        # generate
+        with torch.no_grad():
+            heatmap = self.net_g(noise_vector)
+        return np.array(heatmap.squeeze().tolist()) * 0.5 + 0.5
 
-    # plot heatmap
-    plot_heatmap(np.array(heatmap.squeeze().tolist()) * 0.5 + 0.5, skeleton=skeleton, caption=caption)
+    # discriminate a heatmap, give a score of [0,1]
+    def discriminate(self, heatmap):
+        # heatmap to tensor
+        heatmap = torch.tensor(heatmap * 2 - 1, dtype=torch.float32, device=self.device).view(1, total_keypoints,
+                                                                                              heatmap_size,
+                                                                                              heatmap_size)
 
-
-# using trained generator, plot a generated heatmap
-def plot_fake(generator_path, device, skeleton=None):
-    # load generator model
-    net_g = Generator()
-    net_g.load_state_dict(torch.load(generator_path))
-    net_g.to(device)
-    net_g.eval()
-
-    # noise vector as input to the generator
-    noise_vector = torch.randn(1, noise_size, 1, 1, device=device)
-
-    # generate
-    with torch.no_grad():
-        heatmap = net_g(noise_vector)
-
-    # plot heatmap
-    plot_heatmap(np.array(heatmap.squeeze().tolist()) * 0.5 + 0.5, skeleton=skeleton)
-
-
-# give generator a caption, generate a heatmap, then give it and another heatmap to discriminate
-def discriminate(heatmap, caption, text_model, generator_path, discriminator_path, device, skeleton=None):
-    # load generator and discriminator models
-    net_g = Generator()
-    net_d = Discriminator()
-    net_g.load_state_dict(torch.load(generator_path))
-    net_d.load_state_dict(torch.load(discriminator_path))
-    net_g.to(device)
-    net_d.to(device)
-    net_g.eval()
-    net_d.eval()
-
-    # sentence and noise vector as input to the generator
-    sentence_vector = torch.tensor(text_model.get_sentence_vector(caption), dtype=torch.float32,
-                                   device=device).view(1, sentence_vector_size, 1, 1)
-    noise_vector = torch.randn(1, noise_size, 1, 1, device=device)
-
-    # heatmap to tensor
-    heatmap_real = torch.tensor(heatmap * 2 - 1, dtype=torch.float32, device=device).view(1, total_keypoints,
-                                                                                          heatmap_size, heatmap_size)
-
-    # generate and discriminate
-    with torch.no_grad():
-        heatmap_generated = net_g(noise_vector)
-        score_real = net_d(heatmap_real)
-        score_generated = net_d(heatmap_generated)
-
-    # plot heatmaps
-    plot_heatmap(np.array(heatmap_real.squeeze().tolist()) * 0.5 + 0.5, skeleton=skeleton, caption=caption)
-    plot_heatmap(np.array(heatmap_generated.squeeze().tolist()) * 0.5 + 0.5, skeleton=skeleton, caption=caption)
-
-    # print scores
-    print('score of real heatmap: ' + str(score_real.item()))
-    print('score of generated heatmap: ' + str(score_generated.item()))
-
-
-# generate a heatmap, then give it and another heatmap to discriminate
-def discriminate_fake(heatmap, generator_path, discriminator_path, device, skeleton=None):
-    # load generator and discriminator models
-    net_g = Generator()
-    net_d = Discriminator()
-    net_g.load_state_dict(torch.load(generator_path))
-    net_d.load_state_dict(torch.load(discriminator_path))
-    net_g.to(device)
-    net_d.to(device)
-    net_g.eval()
-    net_d.eval()
-
-    # noise vector as input to the generator
-    noise_vector = torch.randn(1, noise_size, 1, 1, device=device)
-
-    # heatmap to tensor
-    heatmap_real = torch.tensor(heatmap * 2 - 1, dtype=torch.float32, device=device).view(1, total_keypoints,
-                                                                                          heatmap_size, heatmap_size)
-
-    # generate and discriminate
-    with torch.no_grad():
-        heatmap_generated = net_g(noise_vector)
-        score_real = net_d(heatmap_real)
-        score_generated = net_d(heatmap_generated)
-
-    # plot heatmaps
-    plot_heatmap(np.array(heatmap_real.squeeze().tolist()) * 0.5 + 0.5, skeleton=skeleton)
-    plot_heatmap(np.array(heatmap_generated.squeeze().tolist()) * 0.5 + 0.5, skeleton=skeleton)
-
-    # print scores
-    print('score of real heatmap: ' + str(score_real.item()))
-    print('score of generated heatmap: ' + str(score_generated.item()))
+        # discriminate
+        with torch.no_grad():
+            score = self.net_d(heatmap)
+        return score.item()

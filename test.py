@@ -1,8 +1,9 @@
 from model import *
 from pycocotools.coco import COCO
+
 # import fastText
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 generator_path = 'generator'
 discriminator_path = 'discriminator'
@@ -20,14 +21,20 @@ skeleton = np.array(coco_keypoint.loadCats(coco_keypoint.getCatIds())[0]['skelet
 # get single-person image dataset
 dataset = HeatmapDataset(coco_keypoint, coco_caption)
 
-epoch = 8
+epoch = 36
 
-# try the generator
+# try the GAN
+gan = GAN(generator_path + '_' + str(epoch), discriminator_path + '_' + str(epoch), device)
 data = random.choice(dataset.dataset)
-plot_heatmap(get_heatmap2(data.get('keypoint')), skeleton, image_folder + data.get('image').get('file_name'),
-             random.choice(data.get('caption')).get('caption'))
-plot_fake(generator_path + '_' + str(epoch), device, skeleton)
-
-# try the discriminator
 heatmap = get_heatmap2(data.get('keypoint'))
-discriminate_fake(heatmap, generator_path + '_' + str(epoch), discriminator_path + '_' + str(epoch), device, skeleton)
+file_name = data.get('image').get('file_name')
+caption = random.choice(data.get('caption')).get('caption')
+
+# plot a real heatmap
+plot_heatmap(heatmap, skeleton, image_folder + file_name, caption)
+plt.title('(real) score = ' + str(gan.discriminate(heatmap)))
+
+# plot a fake one
+fake = gan.generate()
+plot_heatmap(fake, skeleton)
+plt.title('(fake) score = ' + str(gan.discriminate(fake)))

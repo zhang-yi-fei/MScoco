@@ -5,13 +5,13 @@ import torch.optim as optim
 from datetime import datetime
 
 workers = 2
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 # training parameters
 batch_size = 128
-learning_rate_g = 0.0001
-learning_rate_d = 0.0001
-epoch = 500
+learning_rate_g = 0.0002
+learning_rate_d = 0.0002
+epoch = 100
 
 # ADAM solver
 first_momentum = 0.5
@@ -40,6 +40,8 @@ net_d.apply(weights_init)
 optimizer_g = optim.Adam(net_g.parameters(), lr=learning_rate_g, betas=(first_momentum, second_momentum))
 optimizer_d = optim.Adam(net_d.parameters(), lr=learning_rate_d, betas=(first_momentum, second_momentum))
 criterion = nn.BCELoss()
+scheduler_g = optim.lr_scheduler.ExponentialLR(optimizer_g, 0.8)
+scheduler_d = optim.lr_scheduler.ExponentialLR(optimizer_d, 0.8)
 
 batch_score_right = 0
 batch_score_wrong = 0
@@ -51,14 +53,17 @@ epoch_score_wrong = []
 epoch_score_fake_before = []
 epoch_score_fake_after = []
 epoch_score_interpolated = []
+loss = []
 
 # train
-print(datetime.now())
+start = datetime.now()
+print(start)
 print('training')
 net_g.train()
 net_d.train()
 
 for e in range(epoch):
+    print('learning rate: g ' + str(learning_rate_g) + ' d ' + str(learning_rate_d))
     batch_score_right = 0
     batch_score_wrong = 0
     batch_score_fake_before = 0
@@ -117,6 +122,8 @@ for e in range(epoch):
         # mean_score_wrong = score_wrong.mean().item()
         mean_score_fake_before = score_fake.mean().item()
 
+        loss.append(loss_right.detach() + loss_fake.detach())
+
         # second, optimize generator
         net_g.zero_grad()
 
@@ -141,7 +148,8 @@ for e in range(epoch):
         # print progress
         print('epoch ' + str(e + 1) + ' of ' + str(epoch) + ' batch ' + str(i + 1) + ' of ' + str(batch_number))
         print('score_right: ' + str(mean_score_right) + ' score_fake(before): ' + str(
-            mean_score_fake_before) + ' score_fake(after): ' + str(mean_score_fake_after))
+            mean_score_fake_before) + ' score_fake(after): ' + str(mean_score_fake_after) + ' loss: ' + str(
+            loss[-1].item()))
 
         # record scores
         batch_score_right = batch_score_right + mean_score_right
@@ -149,6 +157,10 @@ for e in range(epoch):
         batch_score_fake_before = batch_score_fake_before + mean_score_fake_before
         batch_score_fake_after = batch_score_fake_after + mean_score_fake_after
         # batch_score_interpolated = batch_score_interpolated + mean_score_interpolated
+
+    # learning rate scheduling
+    scheduler_g.step()
+    scheduler_d.step()
 
     # record scores (epoch average)
     epoch_score_right.append(batch_score_right / batch_number)
@@ -197,6 +209,14 @@ for e in range(epoch):
     plt.savefig('Figure_5.png')
     plt.close()
 
+    # save trace of loss
+    plt.plot(loss)
+    plt.xlabel('batch')
+    plt.ylabel('loss')
+    plt.title('loss')
+    plt.savefig('Figure_6.png')
+    plt.close()
+
     # save scores
     torch.save(epoch_score_right, 'epoch_score_right')
     torch.save(epoch_score_wrong, 'epoch_score_wrong')
@@ -204,5 +224,9 @@ for e in range(epoch):
     torch.save(epoch_score_fake_after, 'epoch_score_fake_after')
     torch.save(epoch_score_interpolated, 'epoch_score_interpolated')
 
+    # save loss
+    torch.save(loss, 'loss')
+
 print('\nfinished')
 print(datetime.now())
+print('(started ' + str(start) + ')')
