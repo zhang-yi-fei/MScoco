@@ -5,7 +5,7 @@ import numpy as np
 import random
 import matplotlib.pyplot as plt
 from skimage import io
-from scipy import ndimage
+from math import sin, cos, pi
 
 generator_path = 'generator'
 discriminator_path = 'discriminator'
@@ -21,9 +21,11 @@ sigma = 2
 # size of heatmap input to network
 heatmap_size = 64
 
-# resized heatmap size
-resize_high = 90
-resize_low = 70
+# heatmap augmentation parameters
+flip = 0.5
+rotate = 10
+scale = 0.8
+translate = 8
 
 # size of text encoding
 sentence_vector_size = 300
@@ -41,13 +43,6 @@ noise_size = 100
 g_input_size = noise_size + compress_size
 d_final_size = convolution_channel[-1]
 
-# big 2d normal distribution
-center = 2000
-size = 2 * center + 1
-grid = np.repeat(np.array([range(size)]), size, axis=0)
-normal = np.exp(-((grid - center) ** 2 + (grid.transpose() - center) ** 2) / sigma ** 2, dtype='float32')
-zero = np.zeros([size, size], dtype='float32')
-
 # x-y grids
 x_grid = np.repeat(np.array([range(heatmap_size)]), heatmap_size, axis=0)
 y_grid = np.repeat(np.array([range(heatmap_size)]).transpose(), heatmap_size, axis=1)
@@ -62,36 +57,8 @@ heatmap_threshold = 0.5
 keypoint_threshold = 8
 
 
-# return ground truth heat map of a training image
-def get_heatmap(data):
-    # get image size and keypoint locations
-    image = data.get('image')
-    keypoint = data.get('keypoint')
-
-    # heatmap size is (number of keypoints)*(image height)*(image width)
-    h = image.get('height')
-    w = image.get('width')
-    c = total_keypoints
-    heatmap = np.empty((c, h, w))
-
-    # keypoints location (x, y) and visibility (v)
-    x = keypoint.get('keypoints')[0::3]
-    y = keypoint.get('keypoints')[1::3]
-    v = keypoint.get('keypoints')[2::3]
-
-    for i in range(c):
-        # labeled keypoints' v > 0
-        if v[i] > 0:
-            # # ground truth in heatmap is normal distribution shaped
-            heatmap[i] = normal[(center - y[i]):(center - y[i] + h), (center - x[i]):(center - x[i] + w)].copy()
-        else:
-            heatmap[i] = zero[0:h, 0:w].copy()
-
-    return heatmap
-
-
-# return ground truth heat map of a training image (fixed-sized square-shaped)
-def get_heatmap2(keypoint):
+# return ground truth heat map of a training image (fixed-sized square-shaped, augmented)
+def get_heatmap(keypoint):
     # heatmap size is (number of keypoints)*(bounding box height)*(bounding box width)
     x0, y0, w, h = tuple(keypoint.get('bbox'))
     c = total_keypoints
@@ -103,12 +70,36 @@ def get_heatmap2(keypoint):
     v = np.array(keypoint.get('keypoints')[2::3])
 
     # calculate the scaling
+    heatmap_half = heatmap_size / 2
     if h > w:
-        x = heatmap_size / 2 - w / h * heatmap_size / 2 + (x - x0) / h * heatmap_size
+        x = heatmap_half - w / h * heatmap_half + (x - x0) / h * heatmap_size
         y = (y - y0) / h * heatmap_size
     else:
         x = (x - x0) / w * heatmap_size
-        y = heatmap_size / 2 - h / w * heatmap_size / 2 + (y - y0) / w * heatmap_size
+        y = heatmap_half - h / w * heatmap_half + (y - y0) / w * heatmap_size
+
+    # do heatmap augmentation
+    x = x - heatmap_half
+    y = y - heatmap_half
+
+    # random flip
+    if random.random() < flip:
+        x = -x
+
+    # random rotation
+    a = random.uniform(-rotate, rotate) * pi / 180
+    sin_a = sin(a)
+    cos_a = cos(a)
+    x, y = tuple(np.dot(np.array([[cos_a, -sin_a], [sin_a, cos_a]]), np.array([x, y])))
+
+    # random scaling
+    a = random.uniform(scale, 1 / scale)
+    x = x * a
+    y = y * a
+
+    # random translation
+    x = x + random.uniform(-translate, translate) + heatmap_half
+    y = y + random.uniform(-translate, translate) + heatmap_half
 
     for i in range(c):
         # labeled keypoints' v > 0
@@ -171,27 +162,6 @@ def plot_heatmap(heatmap, skeleton=None, image_path=None, caption=None):
         plt.xlabel(caption)
 
     plt.show()
-
-
-# return a randomly resized, cropped and flipped heatmap
-def augmented_heatmap(heatmap):
-    # resize
-    resize = random.randint(resize_low, resize_high)
-    zoom = resize / min(heatmap[0].shape)
-    heatmap = ndimage.zoom(heatmap, [1, zoom, zoom], order=1)
-
-    # crop
-    h, w = heatmap[0].shape
-    i = random.randint(0, h - heatmap_size)
-    j = random.randint(0, w - heatmap_size)
-    heatmap = heatmap[:, i:(i + heatmap_size), j:(j + heatmap_size)]
-
-    # flip
-    if random.random() < 0.5:
-        heatmap = np.flip(heatmap, 2).copy()
-
-    # put the images into one 3D tensor
-    return heatmap
 
 
 # get a batch of noise vectors
@@ -259,7 +229,7 @@ class HeatmapDataset(torch.utils.data.Dataset):
         data = self.dataset[index]
 
         # change heatmap range from [0,1] to[-1,1]
-        heatmap = torch.tensor(get_heatmap2(data.get('keypoint')) * 2 - 1, dtype=torch.float32)
+        heatmap = torch.tensor(get_heatmap(data.get('keypoint')) * 2 - 1, dtype=torch.float32)
         if self.with_vector:
             # randomly select from all matching captions
             vector = torch.tensor(random.choice(data.get('vector')), dtype=torch.float32).unsqueeze(-1).unsqueeze(-1)
@@ -365,7 +335,7 @@ class Discriminator(nn.Module):
 
             nn.Conv2d(d_final_size, 1, 4, 1, 0, bias=False),
             # nn.BatchNorm2d(1),
-            nn.Sigmoid()
+            # nn.Sigmoid()
 
         )
 

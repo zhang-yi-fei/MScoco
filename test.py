@@ -21,12 +21,12 @@ skeleton = np.array(coco_keypoint.loadCats(coco_keypoint.getCatIds())[0]['skelet
 # get single-person image dataset
 dataset = HeatmapDataset(coco_keypoint, coco_caption)
 
-epoch = 36
+epoch = 6
 
 # try the GAN
 gan = GAN(generator_path + '_' + str(epoch), discriminator_path + '_' + str(epoch), device)
 data = random.choice(dataset.dataset)
-heatmap = get_heatmap2(data.get('keypoint'))
+heatmap = get_heatmap(data.get('keypoint'))
 file_name = data.get('image').get('file_name')
 caption = random.choice(data.get('caption')).get('caption')
 
@@ -34,7 +34,8 @@ caption = random.choice(data.get('caption')).get('caption')
 plot_heatmap(heatmap, skeleton, image_folder + file_name, caption)
 plt.title('(real) score = ' + str(gan.discriminate(heatmap)))
 
-# plot a fake one
-fake = gan.generate()
-plot_heatmap(fake, skeleton)
-plt.title('(fake) score = ' + str(gan.discriminate(fake)))
+# plot some fake ones
+for i in range(24):
+    fake = gan.generate()
+    plot_heatmap(fake, skeleton)
+    plt.title('(fake) score = ' + str(gan.discriminate(fake)))

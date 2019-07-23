@@ -9,9 +9,18 @@ device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 # training parameters
 batch_size = 128
-learning_rate_g = 0.0002
-learning_rate_d = 0.0002
-epoch = 100
+learning_rate_g = 0.0001
+learning_rate_d = 0.0001
+rate_decay_g = 0.8
+rate_decay_d = 0.8
+rate_step_g = 1
+rate_step_d = 2
+epoch = 200
+real_label = (0.9, 1.1)
+fake_label = (-0.1, 0.1)
+
+# train discriminator k times before training generator
+k = 1
 
 # ADAM solver
 first_momentum = 0.5
@@ -39,9 +48,9 @@ net_g.apply(weights_init)
 net_d.apply(weights_init)
 optimizer_g = optim.Adam(net_g.parameters(), lr=learning_rate_g, betas=(first_momentum, second_momentum))
 optimizer_d = optim.Adam(net_d.parameters(), lr=learning_rate_d, betas=(first_momentum, second_momentum))
-criterion = nn.BCELoss()
-scheduler_g = optim.lr_scheduler.ExponentialLR(optimizer_g, 0.8)
-scheduler_d = optim.lr_scheduler.ExponentialLR(optimizer_d, 0.8)
+criterion = nn.BCEWithLogitsLoss()
+scheduler_g = optim.lr_scheduler.StepLR(optimizer_g, step_size=rate_step_g, gamma=rate_decay_g)
+scheduler_d = optim.lr_scheduler.StepLR(optimizer_d, step_size=rate_step_d, gamma=rate_decay_d)
 
 batch_score_right = 0
 batch_score_wrong = 0
@@ -54,6 +63,7 @@ epoch_score_fake_before = []
 epoch_score_fake_after = []
 epoch_score_interpolated = []
 loss = []
+mean_score_fake_after = 0
 
 # train
 start = datetime.now()
@@ -61,9 +71,11 @@ print(start)
 print('training')
 net_g.train()
 net_d.train()
+iteration = 1
 
 for e in range(epoch):
-    print('learning rate: g ' + str(learning_rate_g) + ' d ' + str(learning_rate_d))
+    print('learning rate: g ' + str(optimizer_g.param_groups[0].get('lr')) + ' d ' + str(
+        optimizer_d.param_groups[0].get('lr')))
     batch_score_right = 0
     batch_score_wrong = 0
     batch_score_fake_before = 0
@@ -97,7 +109,7 @@ for e in range(epoch):
         # score_wrong = net_d(heatmap_real, text_mismatch).view(-1)
 
         # calculate losses and update
-        label = torch.full((current_batch_size,), 1, device=device)
+        label = torch.empty((current_batch_size,), dtype=torch.float32, device=device).uniform_(*real_label)
         loss_right = criterion(score_right, label)
         loss_right.backward()
         # label.fill_(0)
@@ -113,37 +125,42 @@ for e in range(epoch):
         # calculate losses and update
         # label.fill_(0)
         # criterion(score_wrong, label).mul(0.5).backward()
-        label.fill_(0)
+        label.uniform_(*fake_label)
         loss_fake = criterion(score_fake, label)
         loss_fake.backward()
         optimizer_d.step()
 
-        mean_score_right = score_right.mean().item()
-        # mean_score_wrong = score_wrong.mean().item()
-        mean_score_fake_before = score_fake.mean().item()
+        mean_score_right = score_right.detach().mean().item()
+        # mean_score_wrong = score_wrong.detach().mean().item()
+        mean_score_fake_before = score_fake.detach().mean().item()
 
         loss.append(loss_right.detach() + loss_fake.detach())
 
         # second, optimize generator
-        net_g.zero_grad()
+        if iteration == k:
+            iteration = 0
 
-        # generate heatmaps
-        # heatmap_interpolated = net_g(noise2, text_interpolated)
+            noise = noise.to(device)
+            heatmap_fake = net_g(noise)
+            net_g.zero_grad()
 
-        # discriminate heatmpap-text pairs
-        score_fake2 = net_d(heatmap_fake).view(-1)
-        # score_interpolated = net_d(heatmap_interpolated, text_interpolated).view(-1)
+            # generate heatmaps
+            # heatmap_interpolated = net_g(noise2, text_interpolated)
 
-        # calculate losses and update
-        label.fill_(1)
-        loss_fake2 = criterion(score_fake2, label)
-        loss_fake2.backward()
-        # label.fill_(1)
-        # criterion(score_interpolated, label).backward()
-        optimizer_g.step()
+            # discriminate heatmpap-text pairs
+            score_fake2 = net_d(heatmap_fake).view(-1)
+            # score_interpolated = net_d(heatmap_interpolated, text_interpolated).view(-1)
 
-        mean_score_fake_after = score_fake2.mean().item()
-        # mean_score_interpolated = score_interpolated.mean().item()
+            # calculate losses and update
+            label.uniform_(*real_label)
+            loss_fake2 = criterion(score_fake2, label)
+            loss_fake2.backward()
+            # label.fill_(1)
+            # criterion(score_interpolated, label).backward()
+            optimizer_g.step()
+
+            mean_score_fake_after = score_fake2.detach().mean().item()
+            # mean_score_interpolated = score_interpolated.detach().mean().item()
 
         # print progress
         print('epoch ' + str(e + 1) + ' of ' + str(epoch) + ' batch ' + str(i + 1) + ' of ' + str(batch_number))
@@ -157,6 +174,8 @@ for e in range(epoch):
         batch_score_fake_before = batch_score_fake_before + mean_score_fake_before
         batch_score_fake_after = batch_score_fake_after + mean_score_fake_after
         # batch_score_interpolated = batch_score_interpolated + mean_score_interpolated
+
+        iteration = iteration + 1
 
     # learning rate scheduling
     scheduler_g.step()
