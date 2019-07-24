@@ -22,10 +22,10 @@ sigma = 2
 heatmap_size = 64
 
 # heatmap augmentation parameters
-flip = 0.5
-rotate = 10
-scale = 0.8
-translate = 8
+flip = 0
+rotate = 0
+scale = 1
+translate = 0
 
 # size of text encoding
 sentence_vector_size = 300
@@ -37,11 +37,12 @@ compress_size = 0
 beta = 0.5
 
 # numbers of channels of the convolutions
-convolution_channel = [128, 256, 512, 1024]
+convolution_channel_g = [800, 400, 200, 100]
+convolution_channel_d = [80, 160, 320, 640]
 
 noise_size = 100
 g_input_size = noise_size + compress_size
-d_final_size = convolution_channel[-1]
+d_final_size = convolution_channel_d[-1]
 
 # x-y grids
 x_grid = np.repeat(np.array([range(heatmap_size)]), heatmap_size, axis=0)
@@ -270,23 +271,23 @@ class Generator(nn.Module):
 
         # several layers of transposed convolution, batch normalization and ReLu
         self.main = nn.Sequential(
-            nn.ConvTranspose2d(g_input_size, convolution_channel[-1], 4, 1, 0, bias=False),
-            nn.BatchNorm2d(convolution_channel[-1]),
+            nn.ConvTranspose2d(g_input_size, convolution_channel_g[0], 4, 1, 0, bias=False),
+            nn.BatchNorm2d(convolution_channel_g[0]),
             nn.ReLU(True),
 
-            nn.ConvTranspose2d(convolution_channel[-1], convolution_channel[-2], 4, 2, 1, bias=False),
-            nn.BatchNorm2d(convolution_channel[-2]),
+            nn.ConvTranspose2d(convolution_channel_g[0], convolution_channel_g[1], 4, 2, 1, bias=False),
+            nn.BatchNorm2d(convolution_channel_g[1]),
             nn.ReLU(True),
 
-            nn.ConvTranspose2d(convolution_channel[-2], convolution_channel[-3], 4, 2, 1, bias=False),
-            nn.BatchNorm2d(convolution_channel[-3]),
+            nn.ConvTranspose2d(convolution_channel_g[1], convolution_channel_g[2], 4, 2, 1, bias=False),
+            nn.BatchNorm2d(convolution_channel_g[2]),
             nn.ReLU(True),
 
-            nn.ConvTranspose2d(convolution_channel[-3], convolution_channel[-4], 4, 2, 1, bias=False),
-            nn.BatchNorm2d(convolution_channel[-4]),
+            nn.ConvTranspose2d(convolution_channel_g[2], convolution_channel_g[3], 4, 2, 1, bias=False),
+            nn.BatchNorm2d(convolution_channel_g[3]),
             nn.ReLU(True),
 
-            nn.ConvTranspose2d(convolution_channel[-4], total_keypoints, 4, 2, 1, bias=False),
+            nn.ConvTranspose2d(convolution_channel_g[3], total_keypoints, 4, 2, 1, bias=False),
             # nn.BatchNorm2d(total_keypoints),
             nn.Tanh()
 
@@ -317,20 +318,20 @@ class Discriminator(nn.Module):
 
         # several layers of convolution, batch normalization and leaky ReLu
         self.main = nn.Sequential(
-            nn.Conv2d(total_keypoints, convolution_channel[0], 4, 2, 1, bias=False),
-            # nn.BatchNorm2d(convolution_channel[0]),
+            nn.Conv2d(total_keypoints, convolution_channel_d[0], 4, 2, 1, bias=False),
+            # nn.BatchNorm2d(convolution_channel_d[0]),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(convolution_channel[0], convolution_channel[1], 4, 2, 1, bias=False),
-            nn.BatchNorm2d(convolution_channel[1]),
+            nn.Conv2d(convolution_channel_d[0], convolution_channel_d[1], 4, 2, 1, bias=False),
+            nn.BatchNorm2d(convolution_channel_d[1]),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(convolution_channel[1], convolution_channel[2], 4, 2, 1, bias=False),
-            nn.BatchNorm2d(convolution_channel[2]),
+            nn.Conv2d(convolution_channel_d[1], convolution_channel_d[2], 4, 2, 1, bias=False),
+            nn.BatchNorm2d(convolution_channel_d[2]),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(convolution_channel[2], convolution_channel[3], 4, 2, 1, bias=False),
-            nn.BatchNorm2d(convolution_channel[3]),
+            nn.Conv2d(convolution_channel_d[2], convolution_channel_d[3], 4, 2, 1, bias=False),
+            nn.BatchNorm2d(convolution_channel_d[3]),
             nn.LeakyReLU(0.2, inplace=True),
 
             nn.Conv2d(d_final_size, 1, 4, 1, 0, bias=False),
@@ -341,7 +342,7 @@ class Discriminator(nn.Module):
 
         # compute final score of the discriminator with concatenated sentence vector
         # self.second = nn.Sequential(
-        #     nn.Conv2d(convolution_channel[3] + compress_size, d_final_size, 1, bias=False),
+        #     nn.Conv2d(convolution_channel_d[3] + compress_size, d_final_size, 1, bias=False),
         #     nn.BatchNorm2d(d_final_size),
         #     nn.LeakyReLU(0.2, inplace=True),
         #     nn.Conv2d(d_final_size, 1, 4, bias=False),

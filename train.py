@@ -4,20 +4,20 @@ import torch.optim as optim
 # import fastText
 from datetime import datetime
 
-workers = 2
+workers = 4
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 # training parameters
 batch_size = 128
-learning_rate_g = 0.0001
-learning_rate_d = 0.0001
-rate_decay_g = 0.8
-rate_decay_d = 0.8
+learning_rate_g = 0.001
+learning_rate_d = 0.001
+rate_decay_g = 1
+rate_decay_d = 1
 rate_step_g = 1
-rate_step_d = 2
-epoch = 200
-real_label = (0.9, 1.1)
-fake_label = (-0.1, 0.1)
+rate_step_d = 1
+epoch = 40
+real_label = (1, 1)
+fake_label = (0, 0)
 
 # train discriminator k times before training generator
 k = 1
