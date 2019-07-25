@@ -21,7 +21,7 @@ skeleton = np.array(coco_keypoint.loadCats(coco_keypoint.getCatIds())[0]['skelet
 # get single-person image dataset
 dataset = HeatmapDataset(coco_keypoint, coco_caption)
 
-epoch = 16
+epoch = 4
 
 # try the GAN
 gan = GAN(generator_path + '_' + str(epoch), discriminator_path + '_' + str(epoch), device)

@@ -23,7 +23,7 @@ print('COCO supercategories: \n{}'.format(' '.join(nms)))
 # get all images containing given categories, select one at random
 catIds = coco.getCatIds(catNms=['person', 'dog', 'skateboard'])
 imgIds = coco.getImgIds(catIds=catIds)
-img = coco.loadImgs(530745)[0]
+img = coco.loadImgs(433197)[0]
 
 I = io.imread('{}/images/{}'.format(dataDir, img['file_name']))
 plt.axis('off')

@@ -15,7 +15,7 @@ rate_decay_g = 1
 rate_decay_d = 1
 rate_step_g = 1
 rate_step_d = 1
-epoch = 40
+epoch = 30
 real_label = (1, 1)
 fake_label = (0, 0)
 

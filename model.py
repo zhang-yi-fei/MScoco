@@ -37,12 +37,12 @@ compress_size = 0
 beta = 0.5
 
 # numbers of channels of the convolutions
-convolution_channel_g = [800, 400, 200, 100]
-convolution_channel_d = [80, 160, 320, 640]
+convolution_channel_g = [512, 256, 128, 64]
+convolution_channel_d = [64, 128, 256, 512]
 
 noise_size = 100
 g_input_size = noise_size + compress_size
-d_final_size = convolution_channel_d[-1]
+d_final_size = convolution_channel_d[0]
 
 # x-y grids
 x_grid = np.repeat(np.array([range(heatmap_size)]), heatmap_size, axis=0)
@@ -334,7 +334,8 @@ class Discriminator(nn.Module):
             nn.BatchNorm2d(convolution_channel_d[3]),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(d_final_size, 1, 4, 1, 0, bias=False),
+            nn.Conv2d(convolution_channel_d[3], 1, 4, 1, 0, bias=False),
+            # nn.Linear(d_final_size, 2)
             # nn.BatchNorm2d(1),
             # nn.Sigmoid()
 
@@ -376,10 +377,10 @@ def weights_init(m):
         nn.init.normal_(m.weight.data, 0.0, 0.02)
     elif classname.find('BatchNorm') != -1:
         nn.init.normal_(m.weight.data, 1.0, 0.02)
-        nn.init.normal_(m.weight.data, 0.0, 0.02)
-    # elif classname.find('Linear') != -1:
-    #     nn.init.kaiming_normal_(m.weight.data)
-    #     nn.init.constant_(m.bias.data, 0.0)
+        nn.init.normal_(m.bias.data, 0.0, 0.02)
+    elif classname.find('Linear') != -1:
+        nn.init.kaiming_normal_(m.weight.data)
+        nn.init.normal_(m.bias.data, 0.0, 0.02)
 
 
 # a GAN model
