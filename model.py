@@ -37,8 +37,8 @@ compress_size = 0
 beta = 0.5
 
 # numbers of channels of the convolutions
-convolution_channel_g = [512, 256, 128, 64]
-convolution_channel_d = [64, 128, 256, 512]
+convolution_channel_g = [1024, 512, 256, 128]
+convolution_channel_d = [128, 256, 512, 1024]
 
 noise_size = 100
 g_input_size = noise_size + compress_size
@@ -141,7 +141,6 @@ def plot_heatmap(heatmap, skeleton=None, image_path=None, caption=None):
 
     # get a heatmap in single image
     heatmap = np.amax(heatmap, axis=0)
-    plt.figure()
 
     # plot the heatmap in black-white and the optional training image
     if image_path is not None:
@@ -161,8 +160,6 @@ def plot_heatmap(heatmap, skeleton=None, image_path=None, caption=None):
         plt.plot(keypoint[0], keypoint[1], 'og', markersize=4)
         plt.title('stacked heatmaps' + (' and skeleton' if skeleton is not None else ''))
         plt.xlabel(caption)
-
-    plt.show()
 
 
 # get a batch of noise vectors
