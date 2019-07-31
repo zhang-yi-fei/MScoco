@@ -10,12 +10,12 @@ device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 # training parameters
 batch_size = 128
 learning_rate_g = 0.001
-learning_rate_d = 0.001
-rate_decay_g = 0.1
-rate_decay_d = 0.1
-rate_step_g = 5
-rate_step_d = 5
-epoch = 20
+learning_rate_d = 0.0005
+rate_decay_g = 0.2
+rate_decay_d = 0.2
+rate_step_g = 4
+rate_step_d = 4
+epoch = 30
 real_label = (1, 1)
 fake_label = (0, 0)
 
@@ -169,8 +169,8 @@ for e in range(epoch):
             loss_g.append(loss_fake2.detach())
 
         # print progress
-        print('epoch ' + str(e + 1) + ' of ' + str(epoch) + ' batch ' + str(i + 1) + ' of ' + str(batch_number))
-        print('score_right: ' + str(mean_score_right) + ' score_fake(before): ' + str(
+        print('epoch ' + str(e + 1) + ' of ' + str(epoch) + ' batch ' + str(i + 1) + ' of ' + str(
+            batch_number) + ' score_right: ' + str(mean_score_right) + ' score_fake(before): ' + str(
             mean_score_fake_before) + ' score_fake(after): ' + str(mean_score_fake_after) + ' g loss: ' + str(
             loss_g[-1].item()) + ' d loss: ' + str(loss_d[-1].item()))
 
@@ -213,7 +213,7 @@ for e in range(epoch):
         plt.subplot(4, 4, sample + 1)
         plot_heatmap(fixed_fake[sample], skeleton)
         plt.title(f'{1 / (1 + np.exp(-fixed_score[sample])):.3f}')
-    plt.savefig('fixed noise samples_' + str(e + 1) + '.png')
+    plt.savefig('fixed noise samples_' + f'{e + 1:02d}' + '.png')
     plt.close()
 
     # save traces of scores
