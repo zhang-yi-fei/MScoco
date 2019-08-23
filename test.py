@@ -21,24 +21,28 @@ skeleton = np.array(coco_keypoint.loadCats(coco_keypoint.getCatIds())[0]['skelet
 # get single-person image dataset
 dataset = HeatmapDataset(coco_keypoint, coco_caption)
 
-epoch = 3
+epoch = 2
 
 # try the GAN
-gan = GAN(generator_path + '_' + str(epoch), discriminator_path + '_' + str(epoch), device)
+gan = GAN(generator_path + '_' + f'{epoch:02d}', discriminator_path + '_' + f'{epoch:02d}', device)
 data = random.choice(dataset.dataset)
 heatmap = get_heatmap(data.get('keypoint'))
 file_name = data.get('image').get('file_name')
 caption = random.choice(data.get('caption')).get('caption')
 
 # plot a real heatmap
-plot_heatmap(heatmap, skeleton, caption)
+plt.figure()
+plot_heatmap(heatmap, skeleton, image_folder + file_name, caption)
 plt.title('(real) score = ' + str(1 / (1 + np.exp(-gan.discriminate(heatmap)))))
+plt.show()
 
 # plot some fake ones
 for i in range(24):
     fake = gan.generate()
+    plt.figure()
     plot_heatmap(fake, skeleton)
     plt.title('(fake) score = ' + str(1 / (1 + np.exp(-gan.discriminate(fake)))))
+    plt.show()
 
 # pick one fake
 noise = torch.randn(noise_size, dtype=torch.float32)
@@ -53,7 +57,11 @@ for data in dataset.dataset:
         nearest = data
 
 # plot the fake and the nearest neighbor
+plt.figure()
 plot_heatmap(fake, skeleton)
 plt.title('fake score = ' + str(1 / (1 + np.exp(-gan.discriminate(fake)))))
+plt.show()
+plt.figure()
 plot_heatmap(get_heatmap(nearest.get('keypoint')), skeleton)
 plt.title('nearest neighbor score = ' + str(1 / (1 + np.exp(-gan.discriminate(get_heatmap(nearest.get('keypoint')))))))
+plt.show()

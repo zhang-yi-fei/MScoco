@@ -22,10 +22,10 @@ sigma = 2
 heatmap_size = 64
 
 # heatmap augmentation parameters
-flip = 0
-rotate = 0
-scale = 1
-translate = 0
+flip = 0.5
+rotate = 10
+scale = 0.8
+translate = 10
 
 # size of text encoding
 sentence_vector_size = 300
@@ -48,8 +48,6 @@ d_final_size = convolution_channel_d[0]
 x_grid = np.repeat(np.array([range(heatmap_size)]), heatmap_size, axis=0)
 y_grid = np.repeat(np.array([range(heatmap_size)]).transpose(), heatmap_size, axis=1)
 empty = np.zeros([heatmap_size, heatmap_size], dtype='float32')
-testmap = np.array([np.exp(-((x_grid - 3 * i) ** 2 + (y_grid - 3 * i) ** 2) / sigma ** 2, dtype='float32') for i in
-                    range(total_keypoints)])
 
 # to decide whether a keypoint is in the heatmap
 heatmap_threshold = 0.5
@@ -58,7 +56,7 @@ heatmap_threshold = 0.5
 keypoint_threshold = 8
 
 
-# return ground truth heat map of a training image (fixed-sized square-shaped, augmented)
+# return ground truth heatmap of a training image (fixed-sized square-shaped, augmented)
 def get_heatmap(keypoint):
     # heatmap size is (number of keypoints)*(bounding box height)*(bounding box width)
     x0, y0, w, h = tuple(keypoint.get('bbox'))
@@ -109,34 +107,29 @@ def get_heatmap(keypoint):
             heatmap[i] = np.exp(-((x_grid - x[i]) ** 2 + (y_grid - y[i]) ** 2) / sigma ** 2, dtype='float32')
         else:
             heatmap[i] = empty.copy()
-    # heatmap = testmap.copy()
 
     return heatmap
 
 
 # plot a heatmap
 def plot_heatmap(heatmap, skeleton=None, image_path=None, caption=None):
-    x_skeleton = np.empty((2, 0))
-    y_skeleton = np.empty((2, 0))
+    x_skeleton = np.empty((2, 0), dtype='int32')
+    y_skeleton = np.empty((2, 0), dtype='int32')
+
+    # locate the keypoints (the maximum of each channel)
+    keypoint = np.empty((2, total_keypoints), dtype='int32')
+    heatmap_max = np.amax(np.amax(heatmap, axis=1), axis=1)
+    keypoint[0] = np.argmax(np.amax(heatmap, axis=1), axis=1)
+    keypoint[1] = np.argmax(np.amax(heatmap, axis=2), axis=1)
 
     # option to plot skeleton
     if skeleton is not None:
         for line in skeleton:
-            if np.any(heatmap[line[0]] > heatmap_threshold) and np.any(heatmap[line[1]] > heatmap_threshold):
-                x_skeleton = np.hstack((x_skeleton, np.array([[0], [0]])))
-                y_skeleton = np.hstack((y_skeleton, np.array([[0], [0]])))
-
+            if (heatmap[(line,) + tuple(keypoint[::-1, line])] > heatmap_threshold).all():
                 # keypoint is located in the maximum of the heatmap
-                y_skeleton[0, -1], x_skeleton[0, -1] = np.unravel_index(np.argmax(heatmap[line[0]], axis=None),
-                                                                        heatmap[line[0]].shape)
-                y_skeleton[1, -1], x_skeleton[1, -1] = np.unravel_index(np.argmax(heatmap[line[1]], axis=None),
-                                                                        heatmap[line[1]].shape)
+                x_skeleton = np.hstack((x_skeleton, keypoint[0:1, line].transpose()))
+                y_skeleton = np.hstack((y_skeleton, keypoint[1:2, line].transpose()))
 
-    # locate the keypoints (the maximum of each channel)
-    keypoint = np.empty((2, total_keypoints))
-    heatmap_max = np.amax(np.amax(heatmap, axis=1), axis=1)
-    keypoint[0] = np.argmax(np.amax(heatmap, axis=1), axis=1)
-    keypoint[1] = np.argmax(np.amax(heatmap, axis=2), axis=1)
     keypoint = keypoint[:, heatmap_max > heatmap_threshold]
 
     # get a heatmap in single image
@@ -164,9 +157,7 @@ def plot_heatmap(heatmap, skeleton=None, image_path=None, caption=None):
 
 # get a batch of noise vectors
 def get_noise_tensor(number):
-    noise_tensor = torch.empty((number, noise_size, 1, 1), dtype=torch.float32)
-    for i in range(number):
-        noise_tensor[i] = torch.randn((noise_size, 1, 1), dtype=torch.float32)
+    noise_tensor = torch.randn((number, noise_size, 1, 1), dtype=torch.float32)
     return noise_tensor
 
 
@@ -182,28 +173,7 @@ class HeatmapDataset(torch.utils.data.Dataset):
 
         for image_id in image_ids:
             keypoint_ids = coco_keypoint.getAnnIds(imgIds=image_id)
-
-            # limit to single-person images
-            if single_person:
-                # only one person in the image
-                if len(keypoint_ids) == 1:
-                    keypoint = coco_keypoint.loadAnns(ids=keypoint_ids)[0]
-
-                    # with enough keypoints
-                    if keypoint.get('num_keypoints') > keypoint_threshold:
-                        caption_ids = coco_caption.getAnnIds(imgIds=image_id)
-                        captions = coco_caption.loadAnns(ids=caption_ids)
-                        data = {'keypoint': keypoint.copy(), 'caption': captions.copy(),
-                                'image': coco_keypoint.loadImgs(image_id)[0]}
-
-                        # add sentence encoding
-                        if text_model is not None:
-                            data['vector'] = [text_model.get_sentence_vector(caption.get('caption').replace('\n', ''))
-                                              for caption in captions]
-                        self.dataset.append(data)
-
-            # no person limit
-            else:
+            if (single_person and len(keypoint_ids) == 1) or (not single_person):
                 caption_ids = coco_caption.getAnnIds(imgIds=image_id)
                 captions = coco_caption.loadAnns(ids=caption_ids)
 

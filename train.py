@@ -9,13 +9,13 @@ device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 # training parameters
 batch_size = 128
-learning_rate_g = 0.001
+learning_rate_g = 0.0005
 learning_rate_d = 0.0005
-rate_decay_g = 0.2
-rate_decay_d = 0.2
-rate_step_g = 4
-rate_step_d = 4
-epoch = 30
+rate_decay_g = 0.5
+rate_decay_d = 0.5
+rate_step_g = 1
+rate_step_d = 1
+epoch = 20
 real_label = (1, 1)
 fake_label = (0, 0)
 
@@ -31,7 +31,7 @@ coco_caption = COCO(caption_path)
 coco_keypoint = COCO(keypoint_path)
 
 # keypoint connections (skeleton) from annotation file
-skeleton = np.array(coco_keypoint.loadCats(coco_keypoint.getCatIds())[0].get('skeleton')) - 1
+skeleton = np.array(coco_keypoint.loadCats(coco_keypoint.getCatIds())[0].get('skeleton'), dtype='int32') - 1
 
 # load text encoding model
 # text_model = fastText.load_model(text_model_path)
@@ -52,11 +52,6 @@ criterion = nn.BCEWithLogitsLoss()
 scheduler_g = optim.lr_scheduler.StepLR(optimizer_g, step_size=rate_step_g, gamma=rate_decay_g)
 scheduler_d = optim.lr_scheduler.StepLR(optimizer_d, step_size=rate_step_d, gamma=rate_decay_d)
 
-batch_score_right = 0
-batch_score_wrong = 0
-batch_score_fake_before = 0
-batch_score_fake_after = 0
-batch_score_interpolated = 0
 epoch_score_right = []
 epoch_score_wrong = []
 epoch_score_fake_before = []
@@ -77,6 +72,9 @@ net_g.train()
 net_d.train()
 iteration = 1
 
+# number of batches
+batch_number = len(data_loader)
+
 for e in range(epoch):
     print('learning rate: g ' + str(optimizer_g.param_groups[0].get('lr')) + ' d ' + str(
         optimizer_d.param_groups[0].get('lr')))
@@ -85,9 +83,6 @@ for e in range(epoch):
     batch_score_fake_before = 0
     batch_score_fake_after = 0
     batch_score_interpolated = 0
-
-    # number of batches
-    batch_number = len(data_loader)
 
     for i, batch in enumerate(data_loader, 0):
         # get heatmaps, sentence vectors and noises
@@ -123,12 +118,9 @@ for e in range(epoch):
         heatmap_fake = net_g(noise)
 
         # discriminate heatmpap-text pairs
-        # score_wrong = net_d(heatmap_real, text_mismatch).view(-1)
         score_fake = net_d(heatmap_fake.detach()).view(-1)
 
         # calculate losses and update
-        # label.fill_(0)
-        # criterion(score_wrong, label).mul(0.5).backward()
         label.uniform_(*fake_label)
         loss_fake = criterion(score_fake, label)
         loss_fake.backward()
@@ -144,12 +136,15 @@ for e in range(epoch):
         if iteration == k:
             iteration = 0
 
+            # get noises
+            noise = get_noise_tensor(current_batch_size)
             noise = noise.to(device)
-            heatmap_fake = net_g(noise)
-            net_g.zero_grad()
 
             # generate heatmaps
+            heatmap_fake = net_g(noise)
             # heatmap_interpolated = net_g(noise2, text_interpolated)
+
+            net_g.zero_grad()
 
             # discriminate heatmpap-text pairs
             score_fake2 = net_d(heatmap_fake).view(-1)
@@ -195,8 +190,8 @@ for e in range(epoch):
     # epoch_score_interpolated.append(batch_score_interpolated / batch_number)
 
     # save models
-    torch.save(net_g.state_dict(), generator_path + '_' + str(e + 1))
-    torch.save(net_d.state_dict(), discriminator_path + '_' + str(e + 1))
+    torch.save(net_g.state_dict(), generator_path + '_' + f'{e + 1:03d}')
+    torch.save(net_d.state_dict(), discriminator_path + '_' + f'{e + 1:03d}')
 
     # plot and save generated samples from fixed noise
     net_g.eval()
@@ -213,7 +208,7 @@ for e in range(epoch):
         plt.subplot(4, 4, sample + 1)
         plot_heatmap(fixed_fake[sample], skeleton)
         plt.title(f'{1 / (1 + np.exp(-fixed_score[sample])):.3f}')
-    plt.savefig('fixed noise samples_' + f'{e + 1:02d}' + '.png')
+    plt.savefig('fixed_noise_samples_' + f'{e + 1:03d}' + '.png')
     plt.close()
 
     # save traces of scores
