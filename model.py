@@ -7,8 +7,8 @@ import matplotlib.pyplot as plt
 from skimage import io
 from math import sin, cos, pi
 
-generator_path = 'generator'
-discriminator_path = 'discriminator'
+generator_path = 'models/generator'
+discriminator_path = 'models/discriminator'
 image_folder = '/media/data/yzhang2/coco/train/coco/images/'
 caption_path = '/media/data/yzhang2/coco/train/coco/annotations/captions_train2017.json'
 keypoint_path = '/media/data/yzhang2/coco/train/coco/annotations/person_keypoints_train2017.json'
@@ -24,8 +24,8 @@ heatmap_size = 64
 # heatmap augmentation parameters
 flip = 0.5
 rotate = 10
-scale = 0.8
-translate = 10
+scale = 1
+translate = 0
 
 # size of text encoding
 sentence_vector_size = 300
@@ -60,8 +60,7 @@ keypoint_threshold = 8
 def get_heatmap(keypoint):
     # heatmap size is (number of keypoints)*(bounding box height)*(bounding box width)
     x0, y0, w, h = tuple(keypoint.get('bbox'))
-    c = total_keypoints
-    heatmap = np.empty((c, heatmap_size, heatmap_size))
+    heatmap = np.empty((total_keypoints, heatmap_size, heatmap_size))
 
     # keypoints location (x, y) and visibility (v)
     x = np.array(keypoint.get('keypoints')[0::3])
@@ -100,7 +99,7 @@ def get_heatmap(keypoint):
     x = x + random.uniform(-translate, translate) + heatmap_half
     y = y + random.uniform(-translate, translate) + heatmap_half
 
-    for i in range(c):
+    for i in range(total_keypoints):
         # labeled keypoints' v > 0
         if v[i] > 0:
             # ground truth in heatmap is normal distribution shaped
@@ -385,4 +384,4 @@ class GAN(object):
         # discriminate
         with torch.no_grad():
             score = self.net_d(heatmap)
-        return score.item()
+        return score.sigmoid().item()

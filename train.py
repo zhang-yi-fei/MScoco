@@ -4,17 +4,17 @@ import torch.optim as optim
 # import fastText
 from datetime import datetime
 
-workers = 4
+workers = 8
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 # training parameters
 batch_size = 128
-learning_rate_g = 0.0005
+learning_rate_g = 0.001
 learning_rate_d = 0.0005
-rate_decay_g = 0.5
-rate_decay_d = 0.5
-rate_step_g = 1
-rate_step_d = 1
+rate_decay_g = 0.2
+rate_decay_d = 0.2
+rate_step_g = 4
+rate_step_d = 4
 epoch = 20
 real_label = (1, 1)
 fake_label = (0, 0)
@@ -52,15 +52,6 @@ criterion = nn.BCEWithLogitsLoss()
 scheduler_g = optim.lr_scheduler.StepLR(optimizer_g, step_size=rate_step_g, gamma=rate_decay_g)
 scheduler_d = optim.lr_scheduler.StepLR(optimizer_d, step_size=rate_step_d, gamma=rate_decay_d)
 
-epoch_score_right = []
-epoch_score_wrong = []
-epoch_score_fake_before = []
-epoch_score_fake_after = []
-epoch_score_interpolated = []
-loss_g = []
-loss_d = []
-mean_score_fake_after = 0
-
 # fixed noise to see the progression
 fixed_noise = get_noise_tensor(4 * 4).to(device)
 
@@ -78,11 +69,6 @@ batch_number = len(data_loader)
 for e in range(epoch):
     print('learning rate: g ' + str(optimizer_g.param_groups[0].get('lr')) + ' d ' + str(
         optimizer_d.param_groups[0].get('lr')))
-    batch_score_right = 0
-    batch_score_wrong = 0
-    batch_score_fake_before = 0
-    batch_score_fake_after = 0
-    batch_score_interpolated = 0
 
     for i, batch in enumerate(data_loader, 0):
         # get heatmaps, sentence vectors and noises
@@ -126,12 +112,6 @@ for e in range(epoch):
         loss_fake.backward()
         optimizer_d.step()
 
-        mean_score_right = score_right.detach().mean().item()
-        # mean_score_wrong = score_wrong.detach().mean().item()
-        mean_score_fake_before = score_fake.detach().mean().item()
-
-        loss_d.append(loss_right.detach() + loss_fake.detach())
-
         # second, optimize generator
         if iteration == k:
             iteration = 0
@@ -158,36 +138,18 @@ for e in range(epoch):
             # criterion(score_interpolated, label).backward()
             optimizer_g.step()
 
-            mean_score_fake_after = score_fake2.detach().mean().item()
-            # mean_score_interpolated = score_interpolated.detach().mean().item()
-
-            loss_g.append(loss_fake2.detach())
-
         # print progress
         print('epoch ' + str(e + 1) + ' of ' + str(epoch) + ' batch ' + str(i + 1) + ' of ' + str(
-            batch_number) + ' score_right: ' + str(mean_score_right) + ' score_fake(before): ' + str(
-            mean_score_fake_before) + ' score_fake(after): ' + str(mean_score_fake_after) + ' g loss: ' + str(
-            loss_g[-1].item()) + ' d loss: ' + str(loss_d[-1].item()))
-
-        # record scores
-        batch_score_right = batch_score_right + mean_score_right
-        # batch_score_wrong = batch_score_wrong + mean_score_wrong
-        batch_score_fake_before = batch_score_fake_before + mean_score_fake_before
-        batch_score_fake_after = batch_score_fake_after + mean_score_fake_after
-        # batch_score_interpolated = batch_score_interpolated + mean_score_interpolated
+            batch_number) + ' score_right: ' + str(score_right.sigmoid().mean().item()) + ' score_fake(before): ' + str(
+            score_fake.sigmoid().mean().item()) + ' score_fake(after): ' + str(
+            score_fake.sigmoid().mean().item()) + ' g loss: ' + str(
+            loss_right.item() + loss_fake.item()) + ' d loss: ' + str(loss_fake2.item()))
 
         iteration = iteration + 1
 
     # learning rate scheduling
     scheduler_g.step()
     scheduler_d.step()
-
-    # record scores (epoch average)
-    epoch_score_right.append(batch_score_right / batch_number)
-    # epoch_score_wrong.append(batch_score_wrong / batch_number)
-    epoch_score_fake_before.append(batch_score_fake_before / batch_number)
-    epoch_score_fake_after.append(batch_score_fake_after / batch_number)
-    # epoch_score_interpolated.append(batch_score_interpolated / batch_number)
 
     # save models
     torch.save(net_g.state_dict(), generator_path + '_' + f'{e + 1:03d}')
@@ -202,83 +164,14 @@ for e in range(epoch):
     net_g.train()
     net_d.train()
     fixed_fake = np.array(fixed_fake.tolist()) * 0.5 + 0.5
-    fixed_score = np.array(fixed_score.squeeze().tolist())
+    fixed_score = fixed_score.squeeze().sigmoid().tolist()
     plt.figure(figsize=(12.8, 9.6))
     for sample in range(4 * 4):
         plt.subplot(4, 4, sample + 1)
         plot_heatmap(fixed_fake[sample], skeleton)
-        plt.title(f'{1 / (1 + np.exp(-fixed_score[sample])):.3f}')
-    plt.savefig('fixed_noise_samples_' + f'{e + 1:03d}' + '.png')
+        plt.title(f'{fixed_score[sample]:.3f}')
+    plt.savefig('figures/fixed_noise_samples_' + f'{e + 1:03d}' + '.png')
     plt.close()
-
-    # save traces of scores
-    plt.figure(figsize=(12.8, 9.6))
-    plt.plot(epoch_score_right)
-    plt.xlabel('epoch')
-    plt.ylabel('score')
-    plt.title('matching')
-    plt.savefig('Figure_1.png')
-    plt.close()
-
-    plt.figure(figsize=(12.8, 9.6))
-    plt.plot(epoch_score_wrong)
-    plt.xlabel('epoch')
-    plt.ylabel('score')
-    plt.title('mismatching')
-    plt.savefig('Figure_2.png')
-    plt.close()
-
-    plt.figure(figsize=(12.8, 9.6))
-    plt.plot(epoch_score_fake_before)
-    plt.xlabel('epoch')
-    plt.ylabel('score')
-    plt.title('generated (before discriminator updated)')
-    plt.savefig('Figure_3.png')
-    plt.close()
-
-    plt.figure(figsize=(12.8, 9.6))
-    plt.plot(epoch_score_fake_after)
-    plt.xlabel('epoch')
-    plt.ylabel('score')
-    plt.title('generated (after discriminator updated)')
-    plt.savefig('Figure_4.png')
-    plt.close()
-
-    plt.figure(figsize=(12.8, 9.6))
-    plt.plot(epoch_score_interpolated)
-    plt.xlabel('epoch')
-    plt.ylabel('score')
-    plt.title('generated (interpolated)')
-    plt.savefig('Figure_5.png')
-    plt.close()
-
-    # save traces of losses
-    plt.figure(figsize=(12.8, 9.6))
-    plt.plot(loss_g)
-    plt.xlabel('batch')
-    plt.ylabel('loss')
-    plt.title('generator loss')
-    plt.savefig('Figure_6.png')
-    plt.close()
-
-    plt.figure(figsize=(12.8, 9.6))
-    plt.plot(loss_d)
-    plt.xlabel('batch')
-    plt.ylabel('loss')
-    plt.title('discriminator loss')
-    plt.savefig('Figure_7.png')
-    plt.close()
-
-    # save scores
-    torch.save(epoch_score_right, 'epoch_score_right')
-    torch.save(epoch_score_wrong, 'epoch_score_wrong')
-    torch.save(epoch_score_fake_before, 'epoch_score_fake_before')
-    torch.save(epoch_score_fake_after, 'epoch_score_fake_after')
-    torch.save(epoch_score_interpolated, 'epoch_score_interpolated')
-
-    # save losses
-    torch.save(loss_g, 'loss_g')
-    torch.save(loss_d, 'loss_d')
 
 print('\nfinished')
 print(datetime.now())
