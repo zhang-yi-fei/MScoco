@@ -3,6 +3,7 @@ from pycocotools.coco import COCO
 import torch.optim as optim
 # import fastText
 from datetime import datetime
+from torch.utils.tensorboard import SummaryWriter
 
 workers = 8
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -15,7 +16,7 @@ rate_decay_g = 0.2
 rate_decay_d = 0.2
 rate_step_g = 4
 rate_step_d = 4
-epoch = 20
+epoch = 30
 real_label = (1, 1)
 fake_label = (0, 0)
 
@@ -62,6 +63,9 @@ print('training')
 net_g.train()
 net_d.train()
 iteration = 1
+writer = SummaryWriter()
+score_fake2 = None
+loss_fake2 = None
 
 # number of batches
 batch_number = len(data_loader)
@@ -112,6 +116,11 @@ for e in range(epoch):
         loss_fake.backward()
         optimizer_d.step()
 
+        # log
+        writer.add_scalar('loss/d', loss_right + loss_fake, batch_number * e + i)
+        writer.add_scalar('batch_mean_score/real', score_right.sigmoid().mean(), batch_number * e + i)
+        writer.add_scalar('batch_mean_score/fake', score_fake.sigmoid().mean(), batch_number * e + i)
+
         # second, optimize generator
         if iteration == k:
             iteration = 0
@@ -138,12 +147,19 @@ for e in range(epoch):
             # criterion(score_interpolated, label).backward()
             optimizer_g.step()
 
+            # log
+            writer.add_scalar('loss/g', loss_fake2, batch_number * e + i)
+            writer.add_scalar('batch_mean_score/fake_after_d_updated', score_fake2.sigmoid().mean(),
+                              batch_number * e + i)
+
         # print progress
-        print('epoch ' + str(e + 1) + ' of ' + str(epoch) + ' batch ' + str(i + 1) + ' of ' + str(
-            batch_number) + ' score_right: ' + str(score_right.sigmoid().mean().item()) + ' score_fake(before): ' + str(
-            score_fake.sigmoid().mean().item()) + ' score_fake(after): ' + str(
-            score_fake.sigmoid().mean().item()) + ' g loss: ' + str(
-            loss_right.item() + loss_fake.item()) + ' d loss: ' + str(loss_fake2.item()))
+        if score_fake2 is not None:
+            print('epoch ' + str(e + 1) + ' of ' + str(epoch) + ' batch ' + str(i + 1) + ' of ' + str(
+                batch_number) + ' score_right: ' + str(
+                score_right.sigmoid().mean().item()) + ' score_fake(before): ' + str(
+                score_fake.sigmoid().mean().item()) + ' score_fake(after): ' + str(
+                score_fake2.sigmoid().mean().item()) + ' g loss: ' + str(
+                loss_right.item() + loss_fake.item()) + ' d loss: ' + str(loss_fake2.item()))
 
         iteration = iteration + 1
 
