@@ -5,15 +5,15 @@ import torch.optim as optim
 from datetime import datetime
 from torch.utils.tensorboard import SummaryWriter
 
-workers = 8
+workers = 0
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 # training parameters
-batch_size = 128
-learning_rate_g = 0.001
-learning_rate_d = 0.0005
-rate_decay_g = 0.2
-rate_decay_d = 0.2
+batch_size = 256
+learning_rate_g = 0.0002
+learning_rate_d = 0.0002
+rate_decay_g = 1
+rate_decay_d = 1
 rate_step_g = 4
 rate_step_d = 4
 epoch = 30
@@ -66,6 +66,9 @@ iteration = 1
 writer = SummaryWriter()
 score_fake2 = None
 loss_fake2 = None
+
+# log
+writer.add_graph(JoinGAN().to(device), fixed_noise)
 
 # number of batches
 batch_number = len(data_loader)
@@ -120,6 +123,8 @@ for e in range(epoch):
         writer.add_scalar('loss/d', loss_right + loss_fake, batch_number * e + i)
         writer.add_scalar('batch_mean_score/real', score_right.sigmoid().mean(), batch_number * e + i)
         writer.add_scalar('batch_mean_score/fake', score_fake.sigmoid().mean(), batch_number * e + i)
+        writer.add_histogram('batch_score/real', score_right.sigmoid(), batch_number * e + i)
+        writer.add_histogram('batch_score/fake', score_fake.sigmoid(), batch_number * e + i)
 
         # second, optimize generator
         if iteration == k:
@@ -151,6 +156,7 @@ for e in range(epoch):
             writer.add_scalar('loss/g', loss_fake2, batch_number * e + i)
             writer.add_scalar('batch_mean_score/fake_after_d_updated', score_fake2.sigmoid().mean(),
                               batch_number * e + i)
+            writer.add_histogram('batch_score/fake_after_d_updated', score_fake2.sigmoid(), batch_number * e + i)
 
         # print progress
         if score_fake2 is not None:
@@ -181,14 +187,18 @@ for e in range(epoch):
     net_d.train()
     fixed_fake = np.array(fixed_fake.tolist()) * 0.5 + 0.5
     fixed_score = fixed_score.squeeze().sigmoid().tolist()
-    plt.figure(figsize=(12.8, 9.6))
+    f = plt.figure(figsize=(12.8, 9.6))
     for sample in range(4 * 4):
         plt.subplot(4, 4, sample + 1)
         plot_heatmap(fixed_fake[sample], skeleton)
         plt.title(f'{fixed_score[sample]:.3f}')
     plt.savefig('figures/fixed_noise_samples_' + f'{e + 1:03d}' + '.png')
-    plt.close()
+
+    # log
+    writer.add_images('heatmap', np.amax(fixed_fake, 1, keepdims=True), e, dataformats='NCHW')
+    writer.add_figure('heatmaps', f, e)
 
 print('\nfinished')
 print(datetime.now())
 print('(started ' + str(start) + ')')
+writer.close()

@@ -385,3 +385,14 @@ class GAN(object):
         with torch.no_grad():
             score = self.net_d(heatmap)
         return score.sigmoid().item()
+
+
+# join a generator and a discriminator for display in Tensorboard
+class JoinGAN(nn.Module):
+    def __init__(self):
+        super(JoinGAN, self).__init__()
+        self.g = Generator()
+        self.d = Discriminator()
+
+    def forward(self, noise_vector):
+        return self.d(self.g(noise_vector))
