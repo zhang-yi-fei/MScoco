@@ -38,11 +38,11 @@ beta = 0.5
 
 # numbers of channels of the convolutions
 convolution_channel_g = [1024, 512, 256, 128]
-convolution_channel_d = [128, 256, 512, 1024]
+convolution_channel_c = [128, 256, 512, 1024]
 
 noise_size = 100
 g_input_size = noise_size + compress_size
-d_final_size = convolution_channel_d[0]
+d_final_size = convolution_channel_c[0]
 
 # x-y grids
 x_grid = np.repeat(np.array([range(heatmap_size)]), heatmap_size, axis=0)
@@ -254,7 +254,6 @@ class Generator(nn.Module):
             nn.ReLU(True),
 
             nn.ConvTranspose2d(convolution_channel_g[3], total_keypoints, 4, 2, 1, bias=False),
-            # nn.BatchNorm2d(total_keypoints),
             nn.Tanh()
 
         )
@@ -277,39 +276,36 @@ class Generator(nn.Module):
         return self.main(noise_vector)
 
 
-# discriminator given heatmap and sentence vector
+# Discriminator given heatmap and sentence vector
 class Discriminator(nn.Module):
     def __init__(self):
         super(Discriminator, self).__init__()
 
         # several layers of convolution, batch normalization and leaky ReLu
         self.main = nn.Sequential(
-            nn.Conv2d(total_keypoints, convolution_channel_d[0], 4, 2, 1, bias=False),
-            # nn.BatchNorm2d(convolution_channel_d[0]),
+            nn.Conv2d(total_keypoints, convolution_channel_c[0], 4, 2, 1, bias=False),
+            nn.BatchNorm2d(convolution_channel_c[0]),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(convolution_channel_d[0], convolution_channel_d[1], 4, 2, 1, bias=False),
-            nn.BatchNorm2d(convolution_channel_d[1]),
+            nn.Conv2d(convolution_channel_c[0], convolution_channel_c[1], 4, 2, 1, bias=False),
+            nn.BatchNorm2d(convolution_channel_c[1]),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(convolution_channel_d[1], convolution_channel_d[2], 4, 2, 1, bias=False),
-            nn.BatchNorm2d(convolution_channel_d[2]),
+            nn.Conv2d(convolution_channel_c[1], convolution_channel_c[2], 4, 2, 1, bias=False),
+            nn.BatchNorm2d(convolution_channel_c[2]),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(convolution_channel_d[2], convolution_channel_d[3], 4, 2, 1, bias=False),
-            nn.BatchNorm2d(convolution_channel_d[3]),
+            nn.Conv2d(convolution_channel_c[2], convolution_channel_c[3], 4, 2, 1, bias=False),
+            nn.BatchNorm2d(convolution_channel_c[3]),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(convolution_channel_d[3], 1, 4, 1, 0, bias=False),
-            # nn.Linear(d_final_size, 2)
-            # nn.BatchNorm2d(1),
-            # nn.Sigmoid()
+            nn.Conv2d(convolution_channel_c[3], 1, 4, 1, 0, bias=False)
 
         )
 
-        # compute final score of the discriminator with concatenated sentence vector
+        # compute final score of the Discriminator with concatenated sentence vector
         # self.second = nn.Sequential(
-        #     nn.Conv2d(convolution_channel_d[3] + compress_size, d_final_size, 1, bias=False),
+        #     nn.Conv2d(convolution_channel_c[3] + compress_size, d_final_size, 1, bias=False),
         #     nn.BatchNorm2d(d_final_size),
         #     nn.LeakyReLU(0.2, inplace=True),
         #     nn.Conv2d(d_final_size, 1, 4, bias=False),
@@ -345,14 +341,14 @@ def weights_init(m):
         nn.init.normal_(m.weight.data, 1.0, 0.02)
         nn.init.normal_(m.bias.data, 0.0, 0.02)
     elif classname.find('Linear') != -1:
-        nn.init.kaiming_normal_(m.weight.data)
+        nn.init.normal_(m.weight.data, 0.0, 0.02)
         nn.init.normal_(m.bias.data, 0.0, 0.02)
 
 
 # a GAN model
 class GAN(object):
     def __init__(self, generator_path, discriminator_path, device=torch.device('cpu')):
-        # load generator and discriminator models
+        # load generator and Discriminator models
         self.net_g = Generator()
         self.net_d = Discriminator()
         self.net_g.load_state_dict(torch.load(generator_path))
@@ -374,7 +370,7 @@ class GAN(object):
             heatmap = self.net_g(noise_vector)
         return np.array(heatmap.squeeze().tolist()) * 0.5 + 0.5
 
-    # discriminate a heatmap, give a score of [0,1]
+    # discriminate a heatmap
     def discriminate(self, heatmap):
         # heatmap to tensor
         heatmap = torch.tensor(heatmap * 2 - 1, dtype=torch.float32, device=self.device).view(1, total_keypoints,
@@ -384,7 +380,7 @@ class GAN(object):
         # discriminate
         with torch.no_grad():
             score = self.net_d(heatmap)
-        return score.sigmoid().item()
+        return score.item()
 
 
 # join a generator and a discriminator for display in Tensorboard

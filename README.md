@@ -1,2 +1,2 @@
-#MScoco
+# MScoco
 Synthesize poses from texts.
