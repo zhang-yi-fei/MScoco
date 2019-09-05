@@ -16,10 +16,10 @@ text_model_path = '/media/data/yzhang2/wiki.en/wiki.en.bin'
 total_keypoints = 17
 
 # ground truth size in heatmap
-sigma = 2
+sigma = 1
 
 # size of heatmap input to network
-heatmap_size = 64
+heatmap_size = int(32)
 
 # heatmap augmentation parameters
 flip = 0.5
@@ -37,12 +37,12 @@ compress_size = 0
 beta = 0.5
 
 # numbers of channels of the convolutions
-convolution_channel_g = [1024, 512, 256, 128]
-convolution_channel_c = [128, 256, 512, 1024]
+convolution_channel_g = [1024, 512, 256]
+convolution_channel_d = [256, 512, 1024]
 
 noise_size = 100
 g_input_size = noise_size + compress_size
-d_final_size = convolution_channel_c[0]
+d_final_size = convolution_channel_d[0]
 
 # x-y grids
 x_grid = np.repeat(np.array([range(heatmap_size)]), heatmap_size, axis=0)
@@ -52,15 +52,15 @@ empty = np.zeros([heatmap_size, heatmap_size], dtype='float32')
 # to decide whether a keypoint is in the heatmap
 heatmap_threshold = 0.5
 
-# have more than this number of keypoint to be included
+# have more than this number of keypoints to be included
 keypoint_threshold = 8
 
 
 # return ground truth heatmap of a training image (fixed-sized square-shaped, augmented)
 def get_heatmap(keypoint):
-    # heatmap size is (number of keypoints)*(bounding box height)*(bounding box width)
+    # heatmap dimension is (number of keypoints)*(heatmap size)*(heatmap size)
     x0, y0, w, h = tuple(keypoint.get('bbox'))
-    heatmap = np.empty((total_keypoints, heatmap_size, heatmap_size))
+    heatmap = np.empty((total_keypoints, heatmap_size, heatmap_size), dtype='float32')
 
     # keypoints location (x, y) and visibility (v)
     x = np.array(keypoint.get('keypoints')[0::3])
@@ -249,11 +249,7 @@ class Generator(nn.Module):
             nn.BatchNorm2d(convolution_channel_g[2]),
             nn.ReLU(True),
 
-            nn.ConvTranspose2d(convolution_channel_g[2], convolution_channel_g[3], 4, 2, 1, bias=False),
-            nn.BatchNorm2d(convolution_channel_g[3]),
-            nn.ReLU(True),
-
-            nn.ConvTranspose2d(convolution_channel_g[3], total_keypoints, 4, 2, 1, bias=False),
+            nn.ConvTranspose2d(convolution_channel_g[2], total_keypoints, 4, 2, 1, bias=False),
             nn.Tanh()
 
         )
@@ -283,29 +279,22 @@ class Discriminator(nn.Module):
 
         # several layers of convolution, batch normalization and leaky ReLu
         self.main = nn.Sequential(
-            nn.Conv2d(total_keypoints, convolution_channel_c[0], 4, 2, 1, bias=False),
-            nn.BatchNorm2d(convolution_channel_c[0]),
+            nn.Conv2d(total_keypoints, convolution_channel_d[0], 4, 2, 1, bias=False),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(convolution_channel_c[0], convolution_channel_c[1], 4, 2, 1, bias=False),
-            nn.BatchNorm2d(convolution_channel_c[1]),
+            nn.Conv2d(convolution_channel_d[0], convolution_channel_d[1], 4, 2, 1, bias=False),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(convolution_channel_c[1], convolution_channel_c[2], 4, 2, 1, bias=False),
-            nn.BatchNorm2d(convolution_channel_c[2]),
+            nn.Conv2d(convolution_channel_d[1], convolution_channel_d[2], 4, 2, 1, bias=False),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(convolution_channel_c[2], convolution_channel_c[3], 4, 2, 1, bias=False),
-            nn.BatchNorm2d(convolution_channel_c[3]),
-            nn.LeakyReLU(0.2, inplace=True),
-
-            nn.Conv2d(convolution_channel_c[3], 1, 4, 1, 0, bias=False)
+            nn.Conv2d(convolution_channel_d[2], 1, 4, 1, 0, bias=False)
 
         )
 
         # compute final score of the Discriminator with concatenated sentence vector
         # self.second = nn.Sequential(
-        #     nn.Conv2d(convolution_channel_c[3] + compress_size, d_final_size, 1, bias=False),
+        #     nn.Conv2d(convolution_channel_d[3] + compress_size, d_final_size, 1, bias=False),
         #     nn.BatchNorm2d(d_final_size),
         #     nn.LeakyReLU(0.2, inplace=True),
         #     nn.Conv2d(d_final_size, 1, 4, bias=False),
@@ -341,7 +330,7 @@ def weights_init(m):
         nn.init.normal_(m.weight.data, 1.0, 0.02)
         nn.init.normal_(m.bias.data, 0.0, 0.02)
     elif classname.find('Linear') != -1:
-        nn.init.normal_(m.weight.data, 0.0, 0.02)
+        nn.init.kaiming_normal_(m.weight.data)
         nn.init.normal_(m.bias.data, 0.0, 0.02)
 
 

@@ -4,28 +4,30 @@ import torch.optim as optim
 # import fastText
 from datetime import datetime
 from torch.utils.tensorboard import SummaryWriter
+from torch.autograd import grad
 
-workers = 0
+workers = 4
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 # training parameters
-batch_size = 64
-learning_rate_g = 0.00005
-learning_rate_d = 0.00005
+batch_size = 128
+learning_rate_g = 0.0001
+learning_rate_d = 0.0001
 rate_decay_g = 1
 rate_decay_d = 1
 rate_step_g = 4
 rate_step_d = 4
-epoch = 500
+epoch = 10
 
-# weight clipping
-c = 0.01
+# penalty coefficient
+lamb = 10
 
 # train discriminator k times before training generator
 k = 5
 
-# RMSprop smoothing constant
-alpha = 0.99
+# ADAM solver
+beta_1 = 0.0
+beta_2 = 0.9
 
 # read captions and keypoints from files
 coco_caption = COCO(caption_path)
@@ -47,8 +49,8 @@ net_g = Generator().to(device)
 net_d = Discriminator().to(device)
 net_g.apply(weights_init)
 net_d.apply(weights_init)
-optimizer_g = optim.RMSprop(net_g.parameters(), lr=learning_rate_g, alpha=alpha)
-optimizer_d = optim.RMSprop(net_d.parameters(), lr=learning_rate_d, alpha=alpha)
+optimizer_g = optim.Adam(net_g.parameters(), lr=learning_rate_g, betas=(beta_1, beta_2))
+optimizer_d = optim.Adam(net_d.parameters(), lr=learning_rate_d, betas=(beta_1, beta_2))
 scheduler_g = optim.lr_scheduler.StepLR(optimizer_g, step_size=rate_step_g, gamma=rate_decay_g)
 scheduler_d = optim.lr_scheduler.StepLR(optimizer_d, step_size=rate_step_d, gamma=rate_decay_d)
 
@@ -73,7 +75,7 @@ writer.add_graph(JoinGAN().to(device), fixed_noise)
 batch_number = len(data_loader)
 
 for e in range(epoch):
-    print('learning rate: g ' + str(optimizer_g.param_groups[0].get('lr')) + ' c ' + str(
+    print('learning rate: g ' + str(optimizer_g.param_groups[0].get('lr')) + ' d ' + str(
         optimizer_d.param_groups[0].get('lr')))
 
     for i, batch in enumerate(data_loader, 0):
@@ -97,7 +99,6 @@ for e in range(epoch):
 
         # discriminate heatmpap-text pairs
         score_right = net_d(heatmap_real)
-        # score_wrong = net_d(heatmap_real, text_mismatch).view(-1)
 
         # generate heatmaps
         heatmap_fake = net_g(noise).detach()
@@ -105,19 +106,28 @@ for e in range(epoch):
         # discriminate heatmpap-text pairs
         score_fake = net_d(heatmap_fake)
 
+        # random sample
+        epsilon = np.random.rand(current_batch_size)
+        heatmap_sample = torch.empty_like(heatmap_real)
+        for j in range(current_batch_size):
+            heatmap_sample[j] = epsilon[j] * heatmap_real[j] + (1 - epsilon[j]) * heatmap_fake[j]
+        heatmap_sample.requires_grad = True
+
+        # calculate gradient penalty
+        score_sample = net_d(heatmap_sample)
+        gradient, = grad(score_sample, heatmap_sample, torch.ones_like(score_sample), create_graph=True)
+        gradient_norm = gradient.pow(2).sum((1, 2, 3)).sqrt()
+
         # calculate losses and update
-        loss_d = -(score_right.mean() - score_fake.mean())
+        loss_d = (score_fake - score_right + lamb * ((gradient_norm - 1).pow(2))).mean()
         loss_d.backward()
         optimizer_d.step()
-
-        # clipping
-        for p in net_d.parameters():
-            p.data.clamp_(-c, c)
 
         # log
         writer.add_scalar('loss/d', loss_d, batch_number * e + i)
         writer.add_histogram('score/real', score_right, batch_number * e + i)
         writer.add_histogram('score/fake', score_fake, batch_number * e + i)
+        writer.add_histogram('gradient_norm', gradient_norm, batch_number * e + i)
 
         # second, optimize generator
         if iteration == k:
@@ -134,7 +144,6 @@ for e in range(epoch):
 
             # discriminate heatmpap-text pairs
             score_fake = net_d(heatmap_fake)
-            # score_interpolated = net_d(heatmap_interpolated, text_interpolated).view(-1)
 
             # discriminate losses and update
             loss_g = -score_fake.mean()
