@@ -4,6 +4,7 @@ import torch.utils.data
 import numpy as np
 import random
 import matplotlib.pyplot as plt
+import matplotlib.colors
 from skimage import io
 from math import sin, cos, pi
 
@@ -14,6 +15,11 @@ caption_path = '/media/data/yzhang2/coco/train/coco/annotations/captions_train20
 keypoint_path = '/media/data/yzhang2/coco/train/coco/annotations/person_keypoints_train2017.json'
 text_model_path = '/media/data/yzhang2/wiki.en/wiki.en.bin'
 total_keypoints = 17
+keypoint_colors = ['#057020', '#11bb3b', '#12ca3e', '#11bb3b', '#12ca3e', '#1058d1', '#2e73e5', '#cabe12', '#eae053',
+                   '#cabe12', '#eae053', '#1058d1', '#2e73e5', '#9dc15c', '#b1cd7e', '#9dc15c', '#b1cd7e']
+skeleton_colors = ['#b0070a', '#b0070a', '#f40b0f', '#f40b0f', '#ec7f18', '#ad590b', '#ef9643', '#ec7f18', '#952fe9',
+                   '#b467f4', '#952fe9', '#b467f4', '#ee6da5', '#ee6da5', '#ee6da5', '#c8286e', '#e47ca9', '#c8286e',
+                   '#e47ca9']
 
 # ground truth size in heatmap
 sigma = 1
@@ -121,35 +127,49 @@ def plot_heatmap(heatmap, skeleton=None, image_path=None, caption=None):
     keypoint[0] = np.argmax(np.amax(heatmap, axis=1), axis=1)
     keypoint[1] = np.argmax(np.amax(heatmap, axis=2), axis=1)
 
+    skeleton_colors_show = []
+
     # option to plot skeleton
     if skeleton is not None:
-        for line in skeleton:
+        for i, line in enumerate(skeleton, 0):
             if (heatmap[(line,) + tuple(keypoint[::-1, line])] > heatmap_threshold).all():
                 # keypoint is located in the maximum of the heatmap
                 x_skeleton = np.hstack((x_skeleton, keypoint[0:1, line].transpose()))
                 y_skeleton = np.hstack((y_skeleton, keypoint[1:2, line].transpose()))
+                skeleton_colors_show.append(skeleton_colors[i])
 
-    keypoint = keypoint[:, heatmap_max > heatmap_threshold]
+    keypoint_show = np.arange(total_keypoints)[heatmap_max > heatmap_threshold]
 
     # get a heatmap in single image
-    heatmap = np.amax(heatmap, axis=0)
+    heatmap_color = np.empty((total_keypoints, heatmap_size, heatmap_size, 3), dtype='float32')
+    for i in range(total_keypoints):
+        heatmap_color[i] = np.tile(np.array(matplotlib.colors.to_rgb(keypoint_colors[i])),
+                                   (heatmap_size, heatmap_size, 1))
+        heatmap_color[i, :, :, 0] = heatmap_color[i, :, :, 0] * heatmap[i]
+        heatmap_color[i, :, :, 1] = heatmap_color[i, :, :, 1] * heatmap[i]
+        heatmap_color[i, :, :, 2] = heatmap_color[i, :, :, 2] * heatmap[i]
+    heatmap_color = np.amax(heatmap_color, axis=0)
 
     # plot the heatmap in black-white and the optional training image
     if image_path is not None:
         image = io.imread(image_path)
         plt.subplot(1, 2, 1)
-        plt.imshow(heatmap, 'gray', vmin=0.0, vmax=1.0)
-        plt.plot(x_skeleton, y_skeleton, 'red', linewidth=2)
-        plt.plot(keypoint[0], keypoint[1], 'og', markersize=4)
+        plt.imshow(heatmap_color)
+        [plt.plot(x_skeleton[:, i], y_skeleton[:, i], c=skeleton_colors_show[i], linewidth=2) for i in
+         range(len(skeleton_colors_show))]
+        [plt.plot(keypoint[0, i], keypoint[1, i], 'o', c=keypoint_colors[i], markersize=4, markeredgecolor='k',
+                  markeredgewidth=1) for i in keypoint_show]
         plt.title('stacked heatmaps' + (' and skeleton' if skeleton is not None else ''))
         plt.xlabel(caption)
         plt.subplot(1, 2, 2)
         plt.imshow(image)
         plt.title('training image')
     else:
-        plt.imshow(heatmap, 'gray', vmin=0.0, vmax=1.0)
-        plt.plot(x_skeleton, y_skeleton, 'red', linewidth=2)
-        plt.plot(keypoint[0], keypoint[1], 'og', markersize=4)
+        plt.imshow(heatmap_color)
+        [plt.plot(x_skeleton[:, i], y_skeleton[:, i], c=skeleton_colors_show[i], linewidth=2) for i in
+         range(len(skeleton_colors_show))]
+        [plt.plot(keypoint[0, i], keypoint[1, i], 'o', c=keypoint_colors[i], markersize=4, markeredgecolor='k',
+                  markeredgewidth=1) for i in keypoint_show]
         plt.title('stacked heatmaps' + (' and skeleton' if skeleton is not None else ''))
         plt.xlabel(caption)
 

@@ -6,7 +6,7 @@ from datetime import datetime
 from torch.utils.tensorboard import SummaryWriter
 from torch.autograd import grad
 
-workers = 4
+workers = 8
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 # training parameters
@@ -17,7 +17,7 @@ rate_decay_g = 1
 rate_decay_d = 1
 rate_step_g = 4
 rate_step_d = 4
-epoch = 10
+epoch = 100
 
 # penalty coefficient
 lamb = 10
@@ -35,6 +35,20 @@ coco_keypoint = COCO(keypoint_path)
 
 # keypoint connections (skeleton) from annotation file
 skeleton = np.array(coco_keypoint.loadCats(coco_keypoint.getCatIds())[0].get('skeleton'), dtype='int32') - 1
+
+# plot the reference heatmap
+x = np.array([0.5, 0.55, 0.45, 0.6, 0.4, 0.6, 0.4, 0.7, 0.3, 0.8, 0.2, 0.6, 0.4, 0.6, 0.4, 0.6, 0.4]) * heatmap_size
+y = np.array([0.25, 0.2, 0.2, 0.2, 0.2, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.6, 0.6, 0.7, 0.7, 0.8, 0.8]) * heatmap_size
+reference_heatmap = np.empty((total_keypoints, heatmap_size, heatmap_size), dtype='float32')
+for i in range(total_keypoints):
+    reference_heatmap[i] = np.exp(-((x_grid - x[i]) ** 2 + (y_grid - y[i]) ** 2) / sigma ** 2, dtype='float32')
+plt.figure()
+plot_heatmap(reference_heatmap, skeleton)
+plt.title(None)
+plt.xticks([])
+plt.yticks([])
+plt.savefig('reference_heatmap' + '.png')
+plt.close()
 
 # load text encoding model
 # text_model = fastText.load_model(text_model_path)
