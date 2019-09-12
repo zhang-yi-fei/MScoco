@@ -32,12 +32,13 @@ flip = 0.5
 rotate = 10
 scale = 1
 translate = 0
+left_right_swap = [0, 2, 1, 4, 3, 6, 5, 8, 7, 10, 9, 12, 11, 14, 13, 16, 15]
 
 # size of text encoding
 sentence_vector_size = 300
 
 # size of compressed text encoding
-compress_size = 0
+compress_size = 100
 
 # text encoding interpolation
 beta = 0.5
@@ -48,7 +49,7 @@ convolution_channel_d = [256, 512, 1024]
 
 noise_size = 100
 g_input_size = noise_size + compress_size
-d_final_size = convolution_channel_d[0]
+d_final_size = convolution_channel_d[-1]
 
 # x-y grids
 x_grid = np.repeat(np.array([range(heatmap_size)]), heatmap_size, axis=0)
@@ -90,6 +91,11 @@ def get_heatmap(keypoint):
     if random.random() < flip:
         x = -x
 
+        # when flipped, left and right should be swapped
+        x = x[left_right_swap]
+        y = y[left_right_swap]
+        v = v[left_right_swap]
+
     # random rotation
     a = random.uniform(-rotate, rotate) * pi / 180
     sin_a = sin(a)
@@ -118,36 +124,28 @@ def get_heatmap(keypoint):
 
 # plot a heatmap
 def plot_heatmap(heatmap, skeleton=None, image_path=None, caption=None):
-    x_skeleton = np.empty((2, 0), dtype='int32')
-    y_skeleton = np.empty((2, 0), dtype='int32')
-
     # locate the keypoints (the maximum of each channel)
-    keypoint = np.empty((2, total_keypoints), dtype='int32')
     heatmap_max = np.amax(np.amax(heatmap, axis=1), axis=1)
-    keypoint[0] = np.argmax(np.amax(heatmap, axis=1), axis=1)
-    keypoint[1] = np.argmax(np.amax(heatmap, axis=2), axis=1)
-
-    skeleton_colors_show = []
-
-    # option to plot skeleton
-    if skeleton is not None:
-        for i, line in enumerate(skeleton, 0):
-            if (heatmap[(line,) + tuple(keypoint[::-1, line])] > heatmap_threshold).all():
-                # keypoint is located in the maximum of the heatmap
-                x_skeleton = np.hstack((x_skeleton, keypoint[0:1, line].transpose()))
-                y_skeleton = np.hstack((y_skeleton, keypoint[1:2, line].transpose()))
-                skeleton_colors_show.append(skeleton_colors[i])
-
+    x_keypoint = np.argmax(np.amax(heatmap, axis=1), axis=1)
+    y_keypoint = np.argmax(np.amax(heatmap, axis=2), axis=1)
     keypoint_show = np.arange(total_keypoints)[heatmap_max > heatmap_threshold]
 
-    # get a heatmap in single image
+    # option to plot skeleton
+    x_skeleton = []
+    y_skeleton = []
+    skeleton_show = []
+    if skeleton is not None:
+        x_skeleton = x_keypoint[skeleton]
+        y_skeleton = y_keypoint[skeleton]
+        skeleton_show = [i for i in range(len(skeleton)) if (heatmap_max[skeleton[i]] > heatmap_threshold).all()]
+
+    # get a heatmap in single image with colors
     heatmap_color = np.empty((total_keypoints, heatmap_size, heatmap_size, 3), dtype='float32')
     for i in range(total_keypoints):
         heatmap_color[i] = np.tile(np.array(matplotlib.colors.to_rgb(keypoint_colors[i])),
                                    (heatmap_size, heatmap_size, 1))
-        heatmap_color[i, :, :, 0] = heatmap_color[i, :, :, 0] * heatmap[i]
-        heatmap_color[i, :, :, 1] = heatmap_color[i, :, :, 1] * heatmap[i]
-        heatmap_color[i, :, :, 2] = heatmap_color[i, :, :, 2] * heatmap[i]
+        for j in range(3):
+            heatmap_color[i, :, :, j] = heatmap_color[i, :, :, j] * heatmap[i]
     heatmap_color = np.amax(heatmap_color, axis=0)
 
     # plot the heatmap in black-white and the optional training image
@@ -155,9 +153,8 @@ def plot_heatmap(heatmap, skeleton=None, image_path=None, caption=None):
         image = io.imread(image_path)
         plt.subplot(1, 2, 1)
         plt.imshow(heatmap_color)
-        [plt.plot(x_skeleton[:, i], y_skeleton[:, i], c=skeleton_colors_show[i], linewidth=2) for i in
-         range(len(skeleton_colors_show))]
-        [plt.plot(keypoint[0, i], keypoint[1, i], 'o', c=keypoint_colors[i], markersize=4, markeredgecolor='k',
+        [plt.plot(x_skeleton[i], y_skeleton[i], c=skeleton_colors[i], linewidth=2) for i in skeleton_show]
+        [plt.plot(x_keypoint[i], y_keypoint[i], 'o', c=keypoint_colors[i], markersize=4, markeredgecolor='k',
                   markeredgewidth=1) for i in keypoint_show]
         plt.title('stacked heatmaps' + (' and skeleton' if skeleton is not None else ''))
         plt.xlabel(caption)
@@ -166,9 +163,8 @@ def plot_heatmap(heatmap, skeleton=None, image_path=None, caption=None):
         plt.title('training image')
     else:
         plt.imshow(heatmap_color)
-        [plt.plot(x_skeleton[:, i], y_skeleton[:, i], c=skeleton_colors_show[i], linewidth=2) for i in
-         range(len(skeleton_colors_show))]
-        [plt.plot(keypoint[0, i], keypoint[1, i], 'o', c=keypoint_colors[i], markersize=4, markeredgecolor='k',
+        [plt.plot(x_skeleton[i], y_skeleton[i], c=skeleton_colors[i], linewidth=2) for i in skeleton_show]
+        [plt.plot(x_keypoint[i], y_keypoint[i], 'o', c=keypoint_colors[i], markersize=4, markeredgecolor='k',
                   markeredgewidth=1) for i in keypoint_show]
         plt.title('stacked heatmaps' + (' and skeleton' if skeleton is not None else ''))
         plt.xlabel(caption)
@@ -227,37 +223,49 @@ class HeatmapDataset(torch.utils.data.Dataset):
     def get_random_caption_tensor(self, number):
         vector_tensor = torch.empty((number, sentence_vector_size), dtype=torch.float32)
 
-        for i in range(number):
-            # randomly select from all captions
-            vector = random.choice(random.choice(self.dataset).get('vector'))
-            vector_tensor[i] = torch.tensor(vector, dtype=torch.float32)
+        if self.with_vector:
+            for i in range(number):
+                # randomly select from all captions
+                vector = random.choice(random.choice(self.dataset).get('vector'))
+                vector_tensor[i] = torch.tensor(vector, dtype=torch.float32)
 
         return vector_tensor.unsqueeze(-1).unsqueeze(-1)
+
+    # get a batch of random caption from the whole dataset
+    def get_random_caption(self, number):
+        captions = [[]] * number
+
+        for i in range(number):
+            # randomly select from all captions
+            captions[i] = random.choice(random.choice(self.dataset).get('caption')).get('caption')
+
+        return captions
 
     # get a batch of random interpolated caption sentence vectors from the whole dataset
     def get_interpolated_caption_tensor(self, number):
         vector_tensor = torch.empty((number, sentence_vector_size), dtype=torch.float32)
 
-        for i in range(number):
-            # randomly select 2 captions from all captions
-            vector = random.choice(random.choice(self.dataset).get('vector'))
-            vector2 = random.choice(random.choice(self.dataset).get('vector'))
+        if self.with_vector:
+            for i in range(number):
+                # randomly select 2 captions from all captions
+                vector = random.choice(random.choice(self.dataset).get('vector'))
+                vector2 = random.choice(random.choice(self.dataset).get('vector'))
 
-            # interpolate caption sentence vectors
-            interpolated_vector = beta * vector + (1 - beta) * vector2
-            vector_tensor[i] = torch.tensor(interpolated_vector, dtype=torch.float32)
+                # interpolate caption sentence vectors
+                interpolated_vector = beta * vector + (1 - beta) * vector2
+                vector_tensor[i] = torch.tensor(interpolated_vector, dtype=torch.float32)
 
         return vector_tensor.unsqueeze(-1).unsqueeze(-1)
 
 
-# generator given noise and text encoding input
+# generator given noise input
 class Generator(nn.Module):
     def __init__(self):
         super(Generator, self).__init__()
 
         # several layers of transposed convolution, batch normalization and ReLu
+        self.first = nn.ConvTranspose2d(noise_size, convolution_channel_g[0], 4, 1, 0, bias=False)
         self.main = nn.Sequential(
-            nn.ConvTranspose2d(g_input_size, convolution_channel_g[0], 4, 1, 0, bias=False),
             nn.BatchNorm2d(convolution_channel_g[0]),
             nn.ReLU(True),
 
@@ -274,30 +282,16 @@ class Generator(nn.Module):
 
         )
 
-        # compress text encoding first
-        # self.compress = nn.Identity(
-        #     nn.Linear(sentence_vector_size, compress_size),
-        #     nn.BatchNorm1d(compress_size),
-        #     nn.LeakyReLU(0.2, inplace=True)
-        # )
-        # self.compress = nn.Identity()
-
     def forward(self, noise_vector):
-        # concatenate noise vector and compressed sentence vector
-        # input_vector = torch.cat((noise_vector, (
-        #     (self.compress(sentence_vector.view(-1, sentence_vector_size))).view(-1, compress_size, 1, 1))), 1)
-        # input_vector = noise_vector
-
-        # return self.main(input_vector)
-        return self.main(noise_vector)
+        return self.main(self.first(noise_vector))
 
 
-# Discriminator given heatmap and sentence vector
+# discriminator given heatmap
 class Discriminator(nn.Module):
     def __init__(self):
         super(Discriminator, self).__init__()
 
-        # several layers of convolution, batch normalization and leaky ReLu
+        # several layers of convolution and leaky ReLu
         self.main = nn.Sequential(
             nn.Conv2d(total_keypoints, convolution_channel_d[0], 4, 2, 1, bias=False),
             nn.LeakyReLU(0.2, inplace=True),
@@ -306,39 +300,18 @@ class Discriminator(nn.Module):
             nn.LeakyReLU(0.2, inplace=True),
 
             nn.Conv2d(convolution_channel_d[1], convolution_channel_d[2], 4, 2, 1, bias=False),
-            nn.LeakyReLU(0.2, inplace=True),
+            nn.LeakyReLU(0.2, inplace=True)
 
-            nn.Conv2d(convolution_channel_d[2], 1, 4, 1, 0, bias=False)
+        )
+        self.second = nn.Conv2d(convolution_channel_d[-1], d_final_size, 1, bias=False)
+        self.third = nn.Sequential(
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(d_final_size, 1, 4, 1, 0, bias=False)
 
         )
 
-        # compute final score of the Discriminator with concatenated sentence vector
-        # self.second = nn.Sequential(
-        #     nn.Conv2d(convolution_channel_d[3] + compress_size, d_final_size, 1, bias=False),
-        #     nn.BatchNorm2d(d_final_size),
-        #     nn.LeakyReLU(0.2, inplace=True),
-        #     nn.Conv2d(d_final_size, 1, 4, bias=False),
-        #     nn.Sigmoid()
-        # )
-
-        # compress text encoding first
-        # self.compress = nn.Sequential(
-        #     nn.Linear(sentence_vector_size, compress_size),
-        #     nn.BatchNorm1d(compress_size),
-        #     nn.LeakyReLU(0.2, inplace=True)
-        # )
-        # self.compress = nn.Identity()
-
     def forward(self, input_heatmap):
-        # first transposed convolution, then sentence vector
-        # tensor = torch.cat((self.main(input_heatmap), (
-        #     (self.compress(sentence_vector.view(-1, sentence_vector_size))).view(-1, compress_size, 1, 1)).repeat(1, 1,
-        #                                                                                                           4,
-        #                                                                                                           4)),
-        #                    1)
-        # tensor = self.main(input_heatmap)
-
-        return self.main(input_heatmap)
+        return self.third(self.second(self.main(input_heatmap)))
 
 
 # custom weights initialization called on net_g and net_d
@@ -401,3 +374,61 @@ class JoinGAN(nn.Module):
 
     def forward(self, noise_vector):
         return self.d(self.g(noise_vector))
+
+
+# generator given noise and text encoding input
+class Generator2(Generator):
+    def __init__(self):
+        super(Generator2, self).__init__()
+
+        self.first2 = nn.ConvTranspose2d(g_input_size, convolution_channel_g[0], 4, 1, 0, bias=False)
+
+        # compress text encoding first
+        self.compress = nn.Sequential(
+            nn.Linear(sentence_vector_size, compress_size),
+            nn.BatchNorm1d(compress_size),
+            nn.LeakyReLU(0.2, inplace=True)
+        )
+
+    def forward(self, noise_vector, sentence_vector):
+        # concatenate noise vector and compressed sentence vector
+        input_vector = torch.cat((noise_vector, (
+            (self.compress(sentence_vector.view(-1, sentence_vector_size))).view(-1, compress_size, 1, 1))), 1)
+
+        return self.main(self.first2(input_vector))
+
+
+# discriminator given heatmap and sentence vector
+class Discriminator2(Discriminator):
+    def __init__(self):
+        super(Discriminator2, self).__init__()
+
+        # convolution with concatenated sentence vector
+        self.second2 = nn.Conv2d(convolution_channel_d[-1] + compress_size, d_final_size, 1, bias=False)
+
+        # compress text encoding first
+        self.compress = nn.Sequential(
+            nn.Linear(sentence_vector_size, compress_size),
+            nn.BatchNorm1d(compress_size),
+            nn.LeakyReLU(0.2, inplace=True)
+        )
+
+    def forward(self, input_heatmap, sentence_vector):
+        # first convolution, then concatenate sentence vector
+        tensor = torch.cat((self.main(input_heatmap), (
+            (self.compress(sentence_vector.view(-1, sentence_vector_size))).view(-1, compress_size, 1, 1)).repeat(1, 1,
+                                                                                                                  4,
+                                                                                                                  4)),
+                           1)
+        return self.third(self.second2(tensor))
+
+
+# join a generator and a discriminator for display in Tensorboard
+class JoinGAN2(nn.Module):
+    def __init__(self):
+        super(JoinGAN2, self).__init__()
+        self.g = Generator2()
+        self.d = Discriminator2()
+
+    def forward(self, noise_vector, sentence_vector):
+        return self.d(self.g(noise_vector, sentence_vector))

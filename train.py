@@ -1,7 +1,6 @@
 from model import *
 from pycocotools.coco import COCO
 import torch.optim as optim
-# import fastText
 from datetime import datetime
 from torch.utils.tensorboard import SummaryWriter
 from torch.autograd import grad
@@ -13,11 +12,7 @@ device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 batch_size = 128
 learning_rate_g = 0.0001
 learning_rate_d = 0.0001
-rate_decay_g = 1
-rate_decay_d = 1
-rate_step_g = 4
-rate_step_d = 4
-epoch = 100
+epoch = 200
 
 # penalty coefficient
 lamb = 10
@@ -34,11 +29,11 @@ coco_caption = COCO(caption_path)
 coco_keypoint = COCO(keypoint_path)
 
 # keypoint connections (skeleton) from annotation file
-skeleton = np.array(coco_keypoint.loadCats(coco_keypoint.getCatIds())[0].get('skeleton'), dtype='int32') - 1
+skeleton = np.array(coco_keypoint.loadCats(coco_keypoint.getCatIds())[0].get('skeleton')) - 1
 
 # plot the reference heatmap
-x = np.array([0.5, 0.55, 0.45, 0.6, 0.4, 0.6, 0.4, 0.7, 0.3, 0.8, 0.2, 0.6, 0.4, 0.6, 0.4, 0.6, 0.4]) * heatmap_size
-y = np.array([0.25, 0.2, 0.2, 0.2, 0.2, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.6, 0.6, 0.7, 0.7, 0.8, 0.8]) * heatmap_size
+x = np.array([5, 6, 4, 7, 3, 7, 3, 8, 2, 9, 1, 7, 3, 8, 2, 9, 1]) / 10 * heatmap_size
+y = np.array([2, 1, 1, 2, 2, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9]) / 10 * heatmap_size
 reference_heatmap = np.empty((total_keypoints, heatmap_size, heatmap_size), dtype='float32')
 for i in range(total_keypoints):
     reference_heatmap[i] = np.exp(-((x_grid - x[i]) ** 2 + (y_grid - y[i]) ** 2) / sigma ** 2, dtype='float32')
@@ -49,9 +44,6 @@ plt.xticks([])
 plt.yticks([])
 plt.savefig('reference_heatmap' + '.png')
 plt.close()
-
-# load text encoding model
-# text_model = fastText.load_model(text_model_path)
 
 # get the dataset
 dataset = HeatmapDataset(coco_keypoint, coco_caption)
@@ -65,11 +57,12 @@ net_g.apply(weights_init)
 net_d.apply(weights_init)
 optimizer_g = optim.Adam(net_g.parameters(), lr=learning_rate_g, betas=(beta_1, beta_2))
 optimizer_d = optim.Adam(net_d.parameters(), lr=learning_rate_d, betas=(beta_1, beta_2))
-scheduler_g = optim.lr_scheduler.StepLR(optimizer_g, step_size=rate_step_g, gamma=rate_decay_g)
-scheduler_d = optim.lr_scheduler.StepLR(optimizer_d, step_size=rate_step_d, gamma=rate_decay_d)
 
 # fixed noise to see the progression
-fixed_noise = get_noise_tensor(4 * 4).to(device)
+fixed_h = 4
+fixed_w = 4
+fixed_size = fixed_h * fixed_w
+fixed_noise = get_noise_tensor(fixed_size).to(device)
 
 # train
 start = datetime.now()
@@ -96,28 +89,21 @@ for e in range(epoch):
         # first, optimize discriminator
         net_d.zero_grad()
 
-        # get heatmaps, sentence vectors and noises
+        # get heatmaps and noises
         heatmap_real = batch.get('heatmap')
         current_batch_size = len(heatmap_real)
-        # text_mismatch = dataset.get_random_caption_tensor(current_batch_size)
-        # text_interpolated = dataset.get_interpolated_caption_tensor(current_batch_size)
         noise = get_noise_tensor(current_batch_size)
-        # noise2 = get_noise_tensor(current_batch_size)
 
         heatmap_real = heatmap_real.to(device)
-        # text_match = text_match.to(device)
-        # text_mismatch = text_mismatch.to(device)
-        # text_interpolated = text_interpolated.to(device)
         noise = noise.to(device)
-        # noise2 = noise2.to(device)
 
-        # discriminate heatmpap-text pairs
+        # discriminate heatmpaps
         score_right = net_d(heatmap_real)
 
         # generate heatmaps
         heatmap_fake = net_g(noise).detach()
 
-        # discriminate heatmpap-text pairs
+        # discriminate heatmpaps
         score_fake = net_d(heatmap_fake)
 
         # random sample
@@ -154,9 +140,8 @@ for e in range(epoch):
 
             # generate heatmaps
             heatmap_fake = net_g(noise)
-            # heatmap_interpolated = net_g(noise2, text_interpolated)
 
-            # discriminate heatmpap-text pairs
+            # discriminate heatmpaps
             score_fake = net_d(heatmap_fake)
 
             # discriminate losses and update
@@ -174,10 +159,6 @@ for e in range(epoch):
 
         iteration = iteration + 1
 
-    # learning rate scheduling
-    scheduler_g.step()
-    scheduler_d.step()
-
     # save models
     torch.save(net_g.state_dict(), generator_path + '_' + f'{e + 1:03d}')
     torch.save(net_d.state_dict(), discriminator_path + '_' + f'{e + 1:03d}')
@@ -189,8 +170,8 @@ for e in range(epoch):
     net_g.train()
     fixed_fake = np.array(fixed_fake.tolist()) * 0.5 + 0.5
     f = plt.figure(figsize=(12.8, 9.6))
-    for sample in range(4 * 4):
-        plt.subplot(4, 4, sample + 1)
+    for sample in range(fixed_size):
+        plt.subplot(fixed_h, fixed_w, sample + 1)
         plot_heatmap(fixed_fake[sample], skeleton)
         plt.title(None)
         plt.xticks([])
