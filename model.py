@@ -63,8 +63,8 @@ heatmap_threshold = 0.5
 keypoint_threshold = 8
 
 
-# return ground truth heatmap of a training image (fixed-sized square-shaped, augmented)
-def get_heatmap(keypoint):
+# return ground truth heatmap of a training image (fixed-sized square-shaped, can be augmented)
+def get_heatmap(keypoint, augment=True):
     # heatmap dimension is (number of keypoints)*(heatmap size)*(heatmap size)
     x0, y0, w, h = tuple(keypoint.get('bbox'))
     heatmap = np.empty((total_keypoints, heatmap_size, heatmap_size), dtype='float32')
@@ -83,33 +83,34 @@ def get_heatmap(keypoint):
         x = (x - x0) / w * heatmap_size
         y = heatmap_half - h / w * heatmap_half + (y - y0) / w * heatmap_size
 
-    # do heatmap augmentation
-    x = x - heatmap_half
-    y = y - heatmap_half
+    if augment:
+        # do heatmap augmentation
+        x = x - heatmap_half
+        y = y - heatmap_half
 
-    # random flip
-    if random.random() < flip:
-        x = -x
+        # random flip
+        if random.random() < flip:
+            x = -x
 
-        # when flipped, left and right should be swapped
-        x = x[left_right_swap]
-        y = y[left_right_swap]
-        v = v[left_right_swap]
+            # when flipped, left and right should be swapped
+            x = x[left_right_swap]
+            y = y[left_right_swap]
+            v = v[left_right_swap]
 
-    # random rotation
-    a = random.uniform(-rotate, rotate) * pi / 180
-    sin_a = sin(a)
-    cos_a = cos(a)
-    x, y = tuple(np.dot(np.array([[cos_a, -sin_a], [sin_a, cos_a]]), np.array([x, y])))
+        # random rotation
+        a = random.uniform(-rotate, rotate) * pi / 180
+        sin_a = sin(a)
+        cos_a = cos(a)
+        x, y = tuple(np.dot(np.array([[cos_a, -sin_a], [sin_a, cos_a]]), np.array([x, y])))
 
-    # random scaling
-    a = random.uniform(scale, 1 / scale)
-    x = x * a
-    y = y * a
+        # random scaling
+        a = random.uniform(scale, 1 / scale)
+        x = x * a
+        y = y * a
 
-    # random translation
-    x = x + random.uniform(-translate, translate) + heatmap_half
-    y = y + random.uniform(-translate, translate) + heatmap_half
+        # random translation
+        x = x + random.uniform(-translate, translate) + heatmap_half
+        y = y + random.uniform(-translate, translate) + heatmap_half
 
     for i in range(total_keypoints):
         # labeled keypoints' v > 0
@@ -232,14 +233,17 @@ class HeatmapDataset(torch.utils.data.Dataset):
         return vector_tensor.unsqueeze(-1).unsqueeze(-1)
 
     # get a batch of random caption from the whole dataset
-    def get_random_caption(self, number):
-        captions = [[]] * number
+    def get_random_heatmap_with_caption(self, number):
+        caption = [[]] * number
+        heatmap = torch.empty((number, total_keypoints, heatmap_size, heatmap_size), dtype=torch.float32)
 
         for i in range(number):
-            # randomly select from all captions
-            captions[i] = random.choice(random.choice(self.dataset).get('caption')).get('caption')
+            # randomly select from all images
+            data = random.choice(self.dataset)
+            heatmap[i] = torch.tensor(get_heatmap(data.get('keypoint'), augment=False) * 2 - 1, dtype=torch.float32)
+            caption[i] = random.choice(data.get('caption')).get('caption')
 
-        return captions
+        return {'heatmap': heatmap, 'caption': caption}
 
     # get a batch of random interpolated caption sentence vectors from the whole dataset
     def get_interpolated_caption_tensor(self, number):
@@ -409,7 +413,6 @@ class Discriminator2(Discriminator):
         # compress text encoding first
         self.compress = nn.Sequential(
             nn.Linear(sentence_vector_size, compress_size),
-            nn.BatchNorm1d(compress_size),
             nn.LeakyReLU(0.2, inplace=True)
         )
 
@@ -431,4 +434,49 @@ class JoinGAN2(nn.Module):
         self.d = Discriminator2()
 
     def forward(self, noise_vector, sentence_vector):
-        return self.d(self.g(noise_vector, sentence_vector))
+        return self.d(self.g(noise_vector, sentence_vector), sentence_vector)
+
+
+# second GAN model
+class GAN2(object):
+    def __init__(self, generator_path, discriminator_path, text_model, device=torch.device('cpu')):
+        # load generator and Discriminator models
+        self.net_g = Generator2()
+        self.net_d = Discriminator2()
+        self.net_g.load_state_dict(torch.load(generator_path))
+        self.net_d.load_state_dict(torch.load(discriminator_path))
+        self.device = device
+        self.net_g.to(self.device)
+        self.net_d.to(self.device)
+        self.net_g.eval()
+        self.net_d.eval()
+        self.text_model = text_model
+
+    # generate a heatmap from noise
+    def generate(self, caption, noise=None):
+        if noise is None:
+            noise = torch.randn(noise_size, dtype=torch.float32)
+        noise_vector = noise.view(1, noise_size, 1, 1).to(self.device)
+        sentence_vector = self.text_model.get_sentence_vector(caption.replace('\n', ''))
+        sentence_vector = torch.tensor(sentence_vector, dtype=torch.float32).view(1, sentence_vector_size, 1, 1).to(
+            self.device)
+
+        # generate
+        with torch.no_grad():
+            heatmap = self.net_g(noise_vector, sentence_vector)
+        return np.array(heatmap.squeeze().tolist()) * 0.5 + 0.5
+
+    # discriminate a heatmap
+    def discriminate(self, heatmap, caption):
+        # heatmap to tensor
+        heatmap = torch.tensor(heatmap * 2 - 1, dtype=torch.float32, device=self.device).view(1, total_keypoints,
+                                                                                              heatmap_size,
+                                                                                              heatmap_size)
+        sentence_vector = self.text_model.get_sentence_vector(caption.replace('\n', ''))
+        sentence_vector = torch.tensor(sentence_vector, dtype=torch.float32).view(1, sentence_vector_size, 1, 1).to(
+            self.device)
+
+        # discriminate
+        with torch.no_grad():
+            score = self.net_d(heatmap, sentence_vector)
+        return score.item()

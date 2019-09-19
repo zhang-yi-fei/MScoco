@@ -59,10 +59,11 @@ optimizer_g = optim.Adam(net_g.parameters(), lr=learning_rate_g, betas=(beta_1, 
 optimizer_d = optim.Adam(net_d.parameters(), lr=learning_rate_d, betas=(beta_1, beta_2))
 
 # fixed noise to see the progression
-fixed_h = 4
+fixed_h = 6
 fixed_w = 4
 fixed_size = fixed_h * fixed_w
 fixed_noise = get_noise_tensor(fixed_size).to(device)
+torch.save(fixed_noise, 'fixed_noise')
 
 # train
 start = datetime.now()
@@ -160,8 +161,8 @@ for e in range(epoch):
         iteration = iteration + 1
 
     # save models
-    torch.save(net_g.state_dict(), generator_path + '_' + f'{e + 1:03d}')
-    torch.save(net_d.state_dict(), discriminator_path + '_' + f'{e + 1:03d}')
+    torch.save(net_g.state_dict(), generator_path + '_' + f'{e + 1:05d}')
+    torch.save(net_d.state_dict(), discriminator_path + '_' + f'{e + 1:05d}')
 
     # plot and save generated samples from fixed noise
     net_g.eval()
@@ -169,14 +170,14 @@ for e in range(epoch):
         fixed_fake = net_g(fixed_noise)
     net_g.train()
     fixed_fake = np.array(fixed_fake.tolist()) * 0.5 + 0.5
-    f = plt.figure(figsize=(12.8, 9.6))
+    f = plt.figure(figsize=(19.2, 12))
     for sample in range(fixed_size):
         plt.subplot(fixed_h, fixed_w, sample + 1)
         plot_heatmap(fixed_fake[sample], skeleton)
         plt.title(None)
         plt.xticks([])
         plt.yticks([])
-    plt.savefig('figures/fixed_noise_samples_' + f'{e + 1:03d}' + '.png')
+    plt.savefig('figures/fixed_noise_samples_' + f'{e + 1:05d}' + '.png')
 
     # log
     writer.add_images('heatmap', np.amax(fixed_fake, 1, keepdims=True), e, dataformats='NCHW')
