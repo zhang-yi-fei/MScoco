@@ -17,7 +17,10 @@ start_from_epoch = 0
 end_in_epoch = 2000
 
 # penalty coefficient
-lamb = 10
+lamb = 150
+
+# level of text-image matching
+alpha = 1
 
 # train discriminator k times before training generator
 k = 5
@@ -64,8 +67,9 @@ fixed_real = fixed_train.get('heatmap').to(device)
 fixed_real_array = np.array(fixed_real.tolist()) * 0.5 + 0.5
 fixed_caption = fixed_train.get('caption')
 fixed_noise = get_noise_tensor(fixed_h).to(device)
-fixed_text = torch.tensor([text_model.get_sentence_vector(caption.replace('\n', '')) for caption in fixed_caption],
-                          dtype=torch.float32, device=device).unsqueeze(-1).unsqueeze(-1)
+fixed_text = torch.tensor(
+    [text_model.get_sentence_vector(caption.replace('\n', '')) * 100 / pi for caption in fixed_caption],
+    dtype=torch.float32, device=device).unsqueeze(-1).unsqueeze(-1)
 
 # train
 start = datetime.now()
@@ -97,17 +101,17 @@ for e in range(start_from_epoch, end_in_epoch):
         heatmap_real = batch.get('heatmap')
         text_match = batch.get('vector')
         current_batch_size = len(heatmap_real)
-        # text_mismatch = dataset.get_random_caption_tensor(current_batch_size)
+        text_mismatch = dataset.get_random_caption_tensor(current_batch_size)
         noise = get_noise_tensor(current_batch_size)
 
         heatmap_real = heatmap_real.to(device)
         text_match = text_match.to(device)
-        # text_mismatch = text_mismatch.to(device)
+        text_mismatch = text_mismatch.to(device)
         noise = noise.to(device)
 
         # discriminate heatmpap-text pairs
         score_right = net_d(heatmap_real, text_match)
-        # score_wrong = net_d(heatmap_real, text_mismatch)
+        score_wrong = net_d(heatmap_real, text_mismatch)
 
         # generate heatmaps
         heatmap_fake = net_g(noise, text_match).detach()
@@ -130,16 +134,19 @@ for e in range(start_from_epoch, end_in_epoch):
         gradient_norm = (gradient_h.pow(2).sum((1, 2, 3)) + gradient_t.pow(2).sum((1, 2, 3))).sqrt()
 
         # calculate losses and update
-        loss_d = (score_fake - score_right + lamb * ((gradient_norm - 1).pow(2))).mean()
+        loss_d = (score_fake + alpha * score_wrong - (1 + alpha) * score_right + lamb * (
+            torch.max(torch.tensor(0, dtype=torch.float32, device=device), gradient_norm - 1).pow(2))).mean()
         loss_d.backward()
         optimizer_d.step()
 
         # log
         writer.add_scalar('loss/d', loss_d, batch_number * e + i)
         writer.add_histogram('score/real', score_right, batch_number * e + i)
-        # writer.add_histogram('score/wrong', score_wrong, batch_number * e + i)
+        writer.add_histogram('score/wrong', score_wrong, batch_number * e + i)
         writer.add_histogram('score/fake', score_fake, batch_number * e + i)
         writer.add_histogram('gradient_norm', gradient_norm, batch_number * e + i)
+        writer.add_histogram('wasserstein_distance', score_fake + alpha * score_wrong - (1 + alpha) * score_right,
+                             batch_number * e + i)
 
         # second, optimize generator
         if iteration == k:
@@ -147,30 +154,32 @@ for e in range(start_from_epoch, end_in_epoch):
             iteration = 0
 
             # get sentence vectors and noises
-            # text_interpolated = dataset.get_interpolated_caption_tensor(current_batch_size)
+            text_interpolated = dataset.get_interpolated_caption_tensor(current_batch_size)
             noise = get_noise_tensor(current_batch_size)
-            # noise2 = get_noise_tensor(current_batch_size)
-            # text_interpolated = text_interpolated.to(device)
+            noise2 = get_noise_tensor(current_batch_size)
+            text_interpolated = text_interpolated.to(device)
             noise = noise.to(device)
-            # noise2 = noise2.to(device)
+            noise2 = noise2.to(device)
 
             # generate heatmaps
             heatmap_fake = net_g(noise, text_match)
-            # heatmap_interpolated = net_g(noise2, text_interpolated)
+            heatmap_interpolated = net_g(noise2, text_interpolated)
 
             # discriminate heatmpap-text pairs
             score_fake = net_d(heatmap_fake, text_match)
-            # score_interpolated = net_d(heatmap_interpolated, text_interpolated)
+            score_interpolated = net_d(heatmap_interpolated, text_interpolated)
 
             # discriminate losses and update
-            loss_g = -score_fake.mean()
+            loss_g = -(score_fake + score_interpolated).mean()
             loss_g.backward()
             optimizer_g.step()
 
             # log
             writer.add_scalar('loss/g', loss_g, batch_number * e + i)
             writer.add_histogram('score/fake_2', score_fake, batch_number * e + i)
-            # writer.add_histogram('score/interpolated', score_interpolated, batch_number * e + i)
+            writer.add_histogram('score/interpolated', score_interpolated, batch_number * e + i)
+            writer.add_histogram('parameters/g', net_g.parameters(), batch_number * e + i)
+            writer.add_histogram('parameters/d', net_d.parameters(), batch_number * e + i)
 
         # print progress
         print('epoch ' + str(e + 1) + ' of ' + str(end_in_epoch) + ' batch ' + str(i + 1) + ' of ' + str(

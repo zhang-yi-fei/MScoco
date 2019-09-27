@@ -22,10 +22,10 @@ skeleton_colors = ['#b0070a', '#b0070a', '#f40b0f', '#f40b0f', '#ec7f18', '#ad59
                    '#e47ca9']
 
 # ground truth size in heatmap
-sigma = 1
+sigma = 2
 
 # size of heatmap input to network
-heatmap_size = int(32)
+heatmap_size = int(64)
 
 # heatmap augmentation parameters
 flip = 0.5
@@ -38,16 +38,16 @@ left_right_swap = [0, 2, 1, 4, 3, 6, 5, 8, 7, 10, 9, 12, 11, 14, 13, 16, 15]
 sentence_vector_size = 300
 
 # size of compressed text encoding
-compress_size = 100
+compress_size = 128
 
 # text encoding interpolation
 beta = 0.5
 
 # numbers of channels of the convolutions
-convolution_channel_g = [1024, 512, 256]
-convolution_channel_d = [256, 512, 1024]
+convolution_channel_g = [1024, 512, 256, 128]
+convolution_channel_d = [128, 256, 512, 1024]
 
-noise_size = 100
+noise_size = 128
 g_input_size = noise_size + compress_size
 d_final_size = convolution_channel_d[-1]
 
@@ -60,7 +60,7 @@ empty = np.zeros([heatmap_size, heatmap_size], dtype='float32')
 heatmap_threshold = 0.5
 
 # have more than this number of keypoints to be included
-keypoint_threshold = 8
+keypoint_threshold = 7
 
 
 # return ground truth heatmap of a training image (fixed-sized square-shaped, can be augmented)
@@ -202,8 +202,9 @@ class HeatmapDataset(torch.utils.data.Dataset):
 
                         # add sentence encoding
                         if text_model is not None:
-                            data['vector'] = [text_model.get_sentence_vector(caption.get('caption').replace('\n', ''))
-                                              for caption in captions]
+                            data['vector'] = [
+                                text_model.get_sentence_vector(caption.get('caption').replace('\n', '')) * 100 / pi
+                                for caption in captions]
                         self.dataset.append(data)
 
     def __len__(self):
@@ -281,7 +282,11 @@ class Generator(nn.Module):
             nn.BatchNorm2d(convolution_channel_g[2]),
             nn.ReLU(True),
 
-            nn.ConvTranspose2d(convolution_channel_g[2], total_keypoints, 4, 2, 1, bias=False),
+            nn.ConvTranspose2d(convolution_channel_g[2], convolution_channel_g[3], 4, 2, 1, bias=False),
+            nn.BatchNorm2d(convolution_channel_g[3]),
+            nn.ReLU(True),
+
+            nn.ConvTranspose2d(convolution_channel_g[3], total_keypoints, 4, 2, 1, bias=False),
             nn.Tanh()
 
         )
@@ -304,6 +309,9 @@ class Discriminator(nn.Module):
             nn.LeakyReLU(0.2, inplace=True),
 
             nn.Conv2d(convolution_channel_d[1], convolution_channel_d[2], 4, 2, 1, bias=False),
+            nn.LeakyReLU(0.2, inplace=True),
+
+            nn.Conv2d(convolution_channel_d[2], convolution_channel_d[3], 4, 2, 1, bias=False),
             nn.LeakyReLU(0.2, inplace=True)
 
         )
@@ -390,7 +398,6 @@ class Generator2(Generator):
         # compress text encoding first
         self.compress = nn.Sequential(
             nn.Linear(sentence_vector_size, compress_size),
-            nn.BatchNorm1d(compress_size),
             nn.LeakyReLU(0.2, inplace=True)
         )
 
@@ -457,7 +464,7 @@ class GAN2(object):
         if noise is None:
             noise = torch.randn(noise_size, dtype=torch.float32)
         noise_vector = noise.view(1, noise_size, 1, 1).to(self.device)
-        sentence_vector = self.text_model.get_sentence_vector(caption.replace('\n', ''))
+        sentence_vector = self.text_model.get_sentence_vector(caption.replace('\n', '')) * 100 / pi
         sentence_vector = torch.tensor(sentence_vector, dtype=torch.float32).view(1, sentence_vector_size, 1, 1).to(
             self.device)
 
@@ -472,7 +479,7 @@ class GAN2(object):
         heatmap = torch.tensor(heatmap * 2 - 1, dtype=torch.float32, device=self.device).view(1, total_keypoints,
                                                                                               heatmap_size,
                                                                                               heatmap_size)
-        sentence_vector = self.text_model.get_sentence_vector(caption.replace('\n', ''))
+        sentence_vector = self.text_model.get_sentence_vector(caption.replace('\n', '')) * 100 / pi
         sentence_vector = torch.tensor(sentence_vector, dtype=torch.float32).view(1, sentence_vector_size, 1, 1).to(
             self.device)
 
