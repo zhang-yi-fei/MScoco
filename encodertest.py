@@ -1,5 +1,5 @@
 from pycocotools.coco import COCO
-import fastText
+import fasttext
 import random
 import matplotlib.pyplot as plt
 
@@ -7,7 +7,7 @@ caption_path = '/media/data/yzhang2/coco/train/coco/annotations/captions_train20
 text_model_path = '/media/data/yzhang2/wiki.en/wiki.en.bin'
 
 coco = COCO(caption_path)
-model = fastText.load_model('/media/data/yzhang2/wiki.en/wiki.en.bin')
+model = fasttext.load_model('/media/data/yzhang2/wiki.en/wiki.en.bin')
 
 # get all images' ids
 image_ids = coco.getImgIds()

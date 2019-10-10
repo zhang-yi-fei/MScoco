@@ -10,6 +10,7 @@ from math import sin, cos, pi
 
 generator_path = 'models/generator'
 discriminator_path = 'models/discriminator'
+style_encoder_path = 'models/style_encoder'
 image_folder = '/media/data/yzhang2/coco/train/coco/images/'
 caption_path = '/media/data/yzhang2/coco/train/coco/annotations/captions_train2017.json'
 keypoint_path = '/media/data/yzhang2/coco/train/coco/annotations/person_keypoints_train2017.json'
@@ -22,7 +23,7 @@ skeleton_colors = ['#b0070a', '#b0070a', '#f40b0f', '#f40b0f', '#ec7f18', '#ad59
                    '#e47ca9']
 
 # ground truth size in heatmap
-sigma = 2
+sigma = 1
 
 # size of heatmap input to network
 heatmap_size = int(64)
@@ -57,13 +58,43 @@ y_grid = np.repeat(np.array([range(heatmap_size)]).transpose(), heatmap_size, ax
 empty = np.zeros([heatmap_size, heatmap_size], dtype='float32')
 
 # to decide whether a keypoint is in the heatmap
-heatmap_threshold = 0.5
+heatmap_threshold = 0.1
 
 # have more than this number of keypoints to be included
 keypoint_threshold = 7
 
 
-# return ground truth heatmap of a training image (fixed-sized square-shaped, can be augmented)
+# do heatmap augmentation
+def augment_heatmap(x, y, v, heatmap_half, f, a, s, tx, ty):
+    x = x - heatmap_half
+    y = y - heatmap_half
+
+    # flip
+    if f:
+        x = -x
+
+        # when flipped, left and right should be swapped
+        x = x[left_right_swap]
+        y = y[left_right_swap]
+        v = v[left_right_swap]
+
+    # rotation
+    sin_a = sin(a)
+    cos_a = cos(a)
+    x, y = tuple(np.dot(np.array([[cos_a, -sin_a], [sin_a, cos_a]]), np.array([x, y])))
+
+    # scaling
+    x = x * s
+    y = y * s
+
+    # translation
+    x = x + tx + heatmap_half
+    y = y + ty + heatmap_half
+
+    return x, y, v
+
+
+# return ground truth heatmap of a training sample (fixed-sized square-shaped, can be augmented)
 def get_heatmap(keypoint, augment=True):
     # heatmap dimension is (number of keypoints)*(heatmap size)*(heatmap size)
     x0, y0, w, h = tuple(keypoint.get('bbox'))
@@ -83,34 +114,16 @@ def get_heatmap(keypoint, augment=True):
         x = (x - x0) / w * heatmap_size
         y = heatmap_half - h / w * heatmap_half + (y - y0) / w * heatmap_size
 
+    # do heatmap augmentation
     if augment:
-        # do heatmap augmentation
-        x = x - heatmap_half
-        y = y - heatmap_half
-
-        # random flip
-        if random.random() < flip:
-            x = -x
-
-            # when flipped, left and right should be swapped
-            x = x[left_right_swap]
-            y = y[left_right_swap]
-            v = v[left_right_swap]
-
-        # random rotation
+        # random flip, rotation, scaling, translation
+        f = random.random() < flip
         a = random.uniform(-rotate, rotate) * pi / 180
-        sin_a = sin(a)
-        cos_a = cos(a)
-        x, y = tuple(np.dot(np.array([[cos_a, -sin_a], [sin_a, cos_a]]), np.array([x, y])))
+        s = random.uniform(scale, 1 / scale)
+        tx = random.uniform(-translate, translate)
+        ty = random.uniform(-translate, translate)
 
-        # random scaling
-        a = random.uniform(scale, 1 / scale)
-        x = x * a
-        y = y * a
-
-        # random translation
-        x = x + random.uniform(-translate, translate) + heatmap_half
-        y = y + random.uniform(-translate, translate) + heatmap_half
+        x, y, v = augment_heatmap(x, y, v, heatmap_half, f, a, s, tx, ty)
 
     for i in range(total_keypoints):
         # labeled keypoints' v > 0
@@ -123,12 +136,60 @@ def get_heatmap(keypoint, augment=True):
     return heatmap
 
 
+# return ground truth heatmap of a whole training image (fixed-sized square-shaped, can be augmented)
+def get_full_image_heatmap(image, keypoints, augment=True):
+    # heatmap dimension is (number of keypoints)*(heatmap size)*(heatmap size)
+    h = image.get('height')
+    w = image.get('width')
+    heatmap = np.empty((len(keypoints), total_keypoints, heatmap_size, heatmap_size), dtype='float32')
+
+    if augment:
+        # random flip, rotation, scaling, translation
+        f = random.random() < flip
+        a = random.uniform(-rotate, rotate) * pi / 180
+        s = random.uniform(scale, 1 / scale)
+        tx = random.uniform(-translate, translate)
+        ty = random.uniform(-translate, translate)
+
+    # create individual heatmaps
+    for j, keypoint in enumerate(keypoints, 0):
+        # keypoints location (x, y) and visibility (v)
+        x = np.array(keypoint.get('keypoints')[0::3])
+        y = np.array(keypoint.get('keypoints')[1::3])
+        v = np.array(keypoint.get('keypoints')[2::3])
+
+        # calculate the scaling
+        heatmap_half = heatmap_size / 2
+        if h > w:
+            x = heatmap_half - w / h * heatmap_half + x / h * heatmap_size
+            y = y / h * heatmap_size
+        else:
+            x = x / w * heatmap_size
+            y = heatmap_half - h / w * heatmap_half + y / w * heatmap_size
+
+        # do heatmap augmentation
+        if augment:
+            x, y, v = augment_heatmap(x, y, v, heatmap_half, f, a, s, tx, ty)
+
+        for i in range(total_keypoints):
+            # labeled keypoints' v > 0
+            if v[i] > 0:
+                # ground truth in heatmap is normal distribution shaped
+                heatmap[j][i] = np.exp(-((x_grid - x[i]) ** 2 + (y_grid - y[i]) ** 2) / sigma ** 2, dtype='float32')
+            else:
+                heatmap[j][i] = empty.copy()
+
+    # sum individual heatmaps
+    return heatmap.sum(axis=0).clip(0, 1)
+
+
 # plot a heatmap
 def plot_heatmap(heatmap, skeleton=None, image_path=None, caption=None):
     # locate the keypoints (the maximum of each channel)
     heatmap_max = np.amax(np.amax(heatmap, axis=1), axis=1)
-    x_keypoint = np.argmax(np.amax(heatmap, axis=1), axis=1)
-    y_keypoint = np.argmax(np.amax(heatmap, axis=2), axis=1)
+    index_max = np.array([np.unravel_index(np.argmax(h), h.shape) for h in heatmap])
+    x_keypoint = index_max[:, 1]
+    y_keypoint = index_max[:, 0]
     keypoint_show = np.arange(total_keypoints)[heatmap_max > heatmap_threshold]
 
     # option to plot skeleton
@@ -180,46 +241,76 @@ def get_noise_tensor(number):
 # a dataset that constructs heatmaps and optional matching caption encodings tensors on the fly
 class HeatmapDataset(torch.utils.data.Dataset):
     # a dataset contains keypoints and captions, can add sentence encoding
-    def __init__(self, coco_keypoint, coco_caption, single_person=False, text_model=None):
+    def __init__(self, coco_keypoint, coco_caption, single_person=False, text_model=None, return_heatmap=True,
+                 full_image=False):
+
         # get all containing 'person' image ids
         image_ids = coco_keypoint.getImgIds()
 
         self.with_vector = (text_model is not None)
+        self.return_heatmap = return_heatmap
+        self.full_image = full_image
         self.dataset = []
 
         for image_id in image_ids:
             keypoint_ids = coco_keypoint.getAnnIds(imgIds=image_id)
-            if (single_person and len(keypoint_ids) == 1) or (not single_person):
+            if len(keypoint_ids) > 1 and ((single_person and len(keypoint_ids) == 1) or (not single_person)):
                 caption_ids = coco_caption.getAnnIds(imgIds=image_id)
                 captions = coco_caption.loadAnns(ids=caption_ids)
+                keypoints = coco_keypoint.loadAnns(ids=keypoint_ids)
 
-                # each person in the image
-                for keypoint in coco_keypoint.loadAnns(ids=keypoint_ids):
-                    # with enough keypoints
-                    if keypoint.get('num_keypoints') > keypoint_threshold:
-                        data = {'keypoint': keypoint.copy(), 'caption': captions.copy(),
-                                'image': coco_keypoint.loadImgs(image_id)[0]}
+                if full_image:
+                    data = {'keypoints': [], 'caption': captions.copy(),
+                            'image': coco_keypoint.loadImgs(image_id)[0]}
+                    for keypoint in keypoints:
+                        if keypoint.get('num_keypoints') > 0:
+                            data['keypoints'].append(keypoint.copy())
+                    if len(data['keypoints']) == 0:
+                        continue
 
-                        # add sentence encoding
-                        if text_model is not None:
-                            data['vector'] = [
-                                text_model.get_sentence_vector(caption.get('caption').replace('\n', '')) * 100 / pi
-                                for caption in captions]
-                        self.dataset.append(data)
+                    # add sentence encoding
+                    if text_model is not None:
+                        data['vector'] = [
+                            text_model.get_sentence_vector(caption.get('caption').replace('\n', '')) * 100 / pi for
+                            caption in captions]
+                    self.dataset.append(data)
+                else:
+                    # each person in the image
+                    for keypoint in keypoints:
+                        # with enough keypoints
+                        if keypoint.get('num_keypoints') > keypoint_threshold:
+                            data = {'keypoint': keypoint.copy(), 'caption': captions.copy(),
+                                    'image': coco_keypoint.loadImgs(image_id)[0]}
+
+                            # add sentence encoding
+                            if text_model is not None:
+                                data['vector'] = [
+                                    text_model.get_sentence_vector(caption.get('caption').replace('\n', '')) * 100 / pi
+                                    for caption in captions]
+                            self.dataset.append(data)
 
     def __len__(self):
         return len(self.dataset)
 
+    # return either individual heatmap of heatmap of a whole image
+    def get_heatmap(self, data, augment=True):
+        if self.full_image:
+            return get_full_image_heatmap(data.get('image'), data.get('keypoints'), augment)
+        else:
+            return get_heatmap(data.get('keypoint'), augment)
+
     def __getitem__(self, index):
         data = self.dataset[index]
+        heatmap = None
+        vector = None
 
-        # change heatmap range from [0,1] to[-1,1]
-        heatmap = torch.tensor(get_heatmap(data.get('keypoint')) * 2 - 1, dtype=torch.float32)
+        if self.return_heatmap:
+            # change heatmap range from [0,1] to[-1,1]
+            heatmap = torch.tensor(self.get_heatmap(data) * 2 - 1, dtype=torch.float32)
         if self.with_vector:
             # randomly select from all matching captions
             vector = torch.tensor(random.choice(data.get('vector')), dtype=torch.float32).unsqueeze(-1).unsqueeze(-1)
-            return {'heatmap': heatmap, 'vector': vector}
-        return {'heatmap': heatmap}
+        return {'heatmap': heatmap, 'vector': vector}
 
     # get a batch of random caption sentence vectors from the whole dataset
     def get_random_caption_tensor(self, number):
@@ -241,7 +332,7 @@ class HeatmapDataset(torch.utils.data.Dataset):
         for i in range(number):
             # randomly select from all images
             data = random.choice(self.dataset)
-            heatmap[i] = torch.tensor(get_heatmap(data.get('keypoint'), augment=False) * 2 - 1, dtype=torch.float32)
+            heatmap[i] = torch.tensor(self.get_heatmap(data, augment=False) * 2 - 1, dtype=torch.float32)
             caption[i] = random.choice(data.get('caption')).get('caption')
 
         return {'heatmap': heatmap, 'caption': caption}
@@ -487,3 +578,34 @@ class GAN2(object):
         with torch.no_grad():
             score = self.net_d(heatmap, sentence_vector)
         return score.item()
+
+
+# style encoder given heatmap
+class StyleEncoder(nn.Module):
+    def __init__(self):
+        super(StyleEncoder, self).__init__()
+
+        # several layers of convolution, leaky ReLu and batch normalization
+        self.main = nn.Sequential(
+            nn.Conv2d(total_keypoints, convolution_channel_d[0], 4, 2, 1, bias=False),
+            nn.BatchNorm2d(convolution_channel_d[0]),
+            nn.LeakyReLU(0.2, inplace=True),
+
+            nn.Conv2d(convolution_channel_d[0], convolution_channel_d[1], 4, 2, 1, bias=False),
+            nn.BatchNorm2d(convolution_channel_d[1]),
+            nn.LeakyReLU(0.2, inplace=True),
+
+            nn.Conv2d(convolution_channel_d[1], convolution_channel_d[2], 4, 2, 1, bias=False),
+            nn.BatchNorm2d(convolution_channel_d[2]),
+            nn.LeakyReLU(0.2, inplace=True),
+
+            nn.Conv2d(convolution_channel_d[2], convolution_channel_d[3], 4, 2, 1, bias=False),
+            nn.BatchNorm2d(convolution_channel_d[3]),
+            nn.LeakyReLU(0.2, inplace=True),
+
+            nn.Conv2d(convolution_channel_d[3], noise_size, 4, 1, 0, bias=False),
+
+        )
+
+    def forward(self, input_heatmap):
+        return self.main(input_heatmap)

@@ -1,2 +1,1 @@
-# MScoco
-Synthesize poses from texts.
+# Synthesizing Human Pose from Captions

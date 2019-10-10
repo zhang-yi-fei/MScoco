@@ -1,7 +1,7 @@
 from model import *
 from pycocotools.coco import COCO
 import torch.optim as optim
-import fastText
+import fasttext
 from datetime import datetime
 from torch.utils.tensorboard import SummaryWriter
 from torch.autograd import grad
@@ -37,10 +37,10 @@ coco_keypoint = COCO(keypoint_path)
 skeleton = np.array(coco_keypoint.loadCats(coco_keypoint.getCatIds())[0].get('skeleton')) - 1
 
 # load text encoding model
-text_model = fastText.load_model(text_model_path)
+text_model = fasttext.load_model(text_model_path)
 
 # get the dataset (single person, with captions)
-dataset = HeatmapDataset(coco_keypoint, coco_caption, single_person=True, text_model=text_model)
+dataset = HeatmapDataset(coco_keypoint, coco_caption, single_person=False, text_model=text_model, full_image=True)
 
 # data loader, containing heatmap information
 data_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=workers)
@@ -60,7 +60,7 @@ optimizer_d = optim.Adam(net_d.parameters(), lr=learning_rate_d, betas=(beta_1, 
 
 # fixed training data, noise and sentence vectors to see the progression
 fixed_h = 6
-fixed_w = 4
+fixed_w = 5
 fixed_size = fixed_h * fixed_w
 fixed_train = dataset.get_random_heatmap_with_caption(fixed_w)
 fixed_real = fixed_train.get('heatmap').to(device)
@@ -141,12 +141,12 @@ for e in range(start_from_epoch, end_in_epoch):
 
         # log
         writer.add_scalar('loss/d', loss_d, batch_number * e + i)
-        writer.add_histogram('score/real', score_right, batch_number * e + i)
-        writer.add_histogram('score/wrong', score_wrong, batch_number * e + i)
-        writer.add_histogram('score/fake', score_fake, batch_number * e + i)
-        writer.add_histogram('gradient_norm', gradient_norm, batch_number * e + i)
-        writer.add_histogram('wasserstein_distance', score_fake + alpha * score_wrong - (1 + alpha) * score_right,
-                             batch_number * e + i)
+        # writer.add_histogram('score/real', score_right, batch_number * e + i)
+        # writer.add_histogram('score/wrong', score_wrong, batch_number * e + i)
+        # writer.add_histogram('score/fake', score_fake, batch_number * e + i)
+        # writer.add_histogram('gradient_norm', gradient_norm, batch_number * e + i)
+        # writer.add_histogram('wasserstein_distance', score_fake + alpha * score_wrong - (1 + alpha) * score_right,
+        #                      batch_number * e + i)
 
         # second, optimize generator
         if iteration == k:
@@ -176,10 +176,8 @@ for e in range(start_from_epoch, end_in_epoch):
 
             # log
             writer.add_scalar('loss/g', loss_g, batch_number * e + i)
-            writer.add_histogram('score/fake_2', score_fake, batch_number * e + i)
-            writer.add_histogram('score/interpolated', score_interpolated, batch_number * e + i)
-            writer.add_histogram('parameters/g', net_g.parameters(), batch_number * e + i)
-            writer.add_histogram('parameters/d', net_d.parameters(), batch_number * e + i)
+            # writer.add_histogram('score/fake_2', score_fake, batch_number * e + i)
+            # writer.add_histogram('score/interpolated', score_interpolated, batch_number * e + i)
 
         # print progress
         print('epoch ' + str(e + 1) + ' of ' + str(end_in_epoch) + ' batch ' + str(i + 1) + ' of ' + str(
@@ -204,23 +202,24 @@ for e in range(start_from_epoch, end_in_epoch):
     f = plt.figure(figsize=(19.2, 12))
     for sample in range(fixed_w):
         plt.subplot(fixed_h + 1, fixed_w, sample + 1)
-        plot_heatmap(fixed_real_array[sample], skeleton)
-        plt.title(fixed_caption[sample][0:20] + '\n' + fixed_caption[sample][20:])
+        plot_heatmap(fixed_real_array[sample])
+        plt.title(fixed_caption[sample][0:30] + '\n' + fixed_caption[sample][30:])
         plt.xlabel('(real) score = ' + str(fixed_score_real[sample].item()))
         plt.xticks([])
         plt.yticks([])
     for sample in range(fixed_size):
         plt.subplot(fixed_h + 1, fixed_w, fixed_w + sample + 1)
-        plot_heatmap(fixed_fake[sample], skeleton)
+        plot_heatmap(fixed_fake[sample])
         plt.title(None)
         plt.xlabel('(fake) score = ' + str(fixed_score_fake[sample].item()))
         plt.xticks([])
         plt.yticks([])
     plt.savefig('figures/fixed_noise_samples_' + f'{e + 1:05d}' + '.png')
+    plt.close()
 
     # log
-    writer.add_images('heatmap', np.amax(fixed_fake, 1, keepdims=True), e, dataformats='NCHW')
-    writer.add_figure('heatmaps', f, e)
+    # writer.add_images('heatmap', np.amax(fixed_fake, 1, keepdims=True), e, dataformats='NCHW')
+    # writer.add_figure('heatmaps', f, e)
 
 print('\nfinished')
 print(datetime.now())

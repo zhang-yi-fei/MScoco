@@ -59,8 +59,8 @@ optimizer_g = optim.Adam(net_g.parameters(), lr=learning_rate_g, betas=(beta_1, 
 optimizer_d = optim.Adam(net_d.parameters(), lr=learning_rate_d, betas=(beta_1, beta_2))
 
 # fixed noise to see the progression
-fixed_h = 6
-fixed_w = 4
+fixed_h = 4
+fixed_w = 6
 fixed_size = fixed_h * fixed_w
 fixed_noise = get_noise_tensor(fixed_size).to(device)
 torch.save(fixed_noise, 'fixed_noise')
@@ -129,6 +129,7 @@ for e in range(epoch):
         writer.add_histogram('score/real', score_right, batch_number * e + i)
         writer.add_histogram('score/fake', score_fake, batch_number * e + i)
         writer.add_histogram('gradient_norm', gradient_norm, batch_number * e + i)
+        writer.add_histogram('wasserstein_distance', score_fake - score_right, batch_number * e + i)
 
         # second, optimize generator
         if iteration == k:
