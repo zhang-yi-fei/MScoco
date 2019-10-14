@@ -13,7 +13,7 @@ device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 batch_size = 128
 learning_rate_g = 0.0001
 learning_rate_d = 0.0001
-start_from_epoch = 0
+start_from_epoch = 1080
 end_in_epoch = 2000
 
 # penalty coefficient
@@ -40,7 +40,7 @@ skeleton = np.array(coco_keypoint.loadCats(coco_keypoint.getCatIds())[0].get('sk
 text_model = fasttext.load_model(text_model_path)
 
 # get the dataset (single person, with captions)
-dataset = HeatmapDataset(coco_keypoint, coco_caption, single_person=False, text_model=text_model, full_image=True)
+dataset = HeatmapDataset(coco_keypoint, coco_caption, single_person=True, text_model=text_model)
 
 # data loader, containing heatmap information
 data_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=workers)
@@ -51,8 +51,8 @@ net_g.apply(weights_init)
 net_d.apply(weights_init)
 
 # load first step (without captions) trained weights
-# net_g.load_state_dict(torch.load(generator_path + '_' + f'{start_from_epoch:05d}'), False)
-# net_d.load_state_dict(torch.load(discriminator_path + '_' + f'{start_from_epoch:05d}'), False)
+net_g.load_state_dict(torch.load(generator_path + '_' + f'{start_from_epoch:05d}'), False)
+net_d.load_state_dict(torch.load(discriminator_path + '_' + f'{start_from_epoch:05d}'), False)
 # net_g.first2.weight.data[0:noise_size] = net_g.first.weight.data
 # net_d.second2.weight.data[:, 0:convolution_channel_d[-1], :, :] = net_d.second.weight.data
 optimizer_g = optim.Adam(net_g.parameters(), lr=learning_rate_g, betas=(beta_1, beta_2))
@@ -67,9 +67,8 @@ fixed_real = fixed_train.get('heatmap').to(device)
 fixed_real_array = np.array(fixed_real.tolist()) * 0.5 + 0.5
 fixed_caption = fixed_train.get('caption')
 fixed_noise = get_noise_tensor(fixed_h).to(device)
-fixed_text = torch.tensor(
-    [text_model.get_sentence_vector(caption.replace('\n', '')) * 100 / pi for caption in fixed_caption],
-    dtype=torch.float32, device=device).unsqueeze(-1).unsqueeze(-1)
+fixed_text = torch.tensor([get_caption_vector(text_model, caption) for caption in fixed_caption], dtype=torch.float32,
+                          device=device).unsqueeze(-1).unsqueeze(-1)
 
 # train
 start = datetime.now()
@@ -202,14 +201,14 @@ for e in range(start_from_epoch, end_in_epoch):
     f = plt.figure(figsize=(19.2, 12))
     for sample in range(fixed_w):
         plt.subplot(fixed_h + 1, fixed_w, sample + 1)
-        plot_heatmap(fixed_real_array[sample])
+        plot_heatmap(fixed_real_array[sample], skeleton)
         plt.title(fixed_caption[sample][0:30] + '\n' + fixed_caption[sample][30:])
         plt.xlabel('(real) score = ' + str(fixed_score_real[sample].item()))
         plt.xticks([])
         plt.yticks([])
     for sample in range(fixed_size):
         plt.subplot(fixed_h + 1, fixed_w, fixed_w + sample + 1)
-        plot_heatmap(fixed_fake[sample])
+        plot_heatmap(fixed_fake[sample], skeleton)
         plt.title(None)
         plt.xlabel('(fake) score = ' + str(fixed_score_fake[sample].item()))
         plt.xticks([])

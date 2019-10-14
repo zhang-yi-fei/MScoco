@@ -25,15 +25,15 @@ coco_keypoint = COCO(keypoint_path)
 text_model = fasttext.load_model(text_model_path)
 
 # get the dataset (single person, with captions)
-dataset = HeatmapDataset(coco_keypoint, coco_caption, single_person=True, text_model=text_model, return_heatmap=False)
+dataset = HeatmapDataset(coco_keypoint, coco_caption, single_person=True, text_model=text_model, caption_only=True)
 
 # data loader, containing heatmap information
 data_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=workers)
 
 # generator from previous training
-previous_epoch = 1000
+gan_epoch = 2000
 net_g = Generator2()
-net_g.load_state_dict(torch.load(generator_path + '_' + f'{previous_epoch:05d}'))
+net_g.load_state_dict(torch.load(generator_path + '_' + f'{gan_epoch:05d}'))
 net_g.to(device)
 net_g.eval()
 
@@ -50,6 +50,10 @@ print('training')
 net_s.train()
 writer = SummaryWriter()
 
+# log
+writer.add_graph(net_s, net_g(get_noise_tensor(batch_size).to(device),
+                              dataset.get_random_caption_tensor(batch_size).to(device)))
+
 # number of batches
 batch_number = len(data_loader)
 
@@ -65,6 +69,9 @@ for e in range(epoch):
         current_batch_size = len(text)
         noise = get_noise_tensor(current_batch_size)
 
+        text = text.to(device)
+        noise = noise.to(device)
+
         # generate heatmaps
         heatmap_fake = net_g(noise, text).detach()
 
@@ -77,7 +84,7 @@ for e in range(epoch):
         optimizer_s.step()
 
         # log
-        writer.add_scalar('loss/d', loss, batch_number * e + i)
+        writer.add_scalar('loss/s', loss, batch_number * e + i)
 
         # print progress
         print('epoch ' + str(e + 1) + ' of ' + str(epoch) + ' batch ' + str(i + 1) + ' of ' + str(

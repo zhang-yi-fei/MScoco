@@ -14,6 +14,9 @@ style_encoder_path = 'models/style_encoder'
 image_folder = '/media/data/yzhang2/coco/train/coco/images/'
 caption_path = '/media/data/yzhang2/coco/train/coco/annotations/captions_train2017.json'
 keypoint_path = '/media/data/yzhang2/coco/train/coco/annotations/person_keypoints_train2017.json'
+image_folder_val = '/media/data/yzhang2/coco/val/coco/images/'
+caption_path_val = '/media/data/yzhang2/coco/val/coco/annotations/captions_val2017.json'
+keypoint_path_val = '/media/data/yzhang2/coco/val/coco/annotations/person_keypoints_val2017.json'
 text_model_path = '/media/data/yzhang2/wiki.en/wiki.en.bin'
 total_keypoints = 17
 keypoint_colors = ['#057020', '#11bb3b', '#12ca3e', '#11bb3b', '#12ca3e', '#1058d1', '#2e73e5', '#cabe12', '#eae053',
@@ -232,6 +235,11 @@ def plot_heatmap(heatmap, skeleton=None, image_path=None, caption=None):
         plt.xlabel(caption)
 
 
+# return the caption encoding
+def get_caption_vector(text_model, caption):
+    return text_model.get_sentence_vector(caption.replace('\n', '')) * 100 / pi
+
+
 # get a batch of noise vectors
 def get_noise_tensor(number):
     noise_tensor = torch.randn((number, noise_size, 1, 1), dtype=torch.float32)
@@ -241,20 +249,19 @@ def get_noise_tensor(number):
 # a dataset that constructs heatmaps and optional matching caption encodings tensors on the fly
 class HeatmapDataset(torch.utils.data.Dataset):
     # a dataset contains keypoints and captions, can add sentence encoding
-    def __init__(self, coco_keypoint, coco_caption, single_person=False, text_model=None, return_heatmap=True,
-                 full_image=False):
+    def __init__(self, coco_keypoint, coco_caption, single_person=False, text_model=None, caption_only=False, full_image=False):
 
         # get all containing 'person' image ids
         image_ids = coco_keypoint.getImgIds()
 
         self.with_vector = (text_model is not None)
-        self.return_heatmap = return_heatmap
+        self.caption_only = caption_only
         self.full_image = full_image
         self.dataset = []
 
         for image_id in image_ids:
             keypoint_ids = coco_keypoint.getAnnIds(imgIds=image_id)
-            if len(keypoint_ids) > 1 and ((single_person and len(keypoint_ids) == 1) or (not single_person)):
+            if len(keypoint_ids) > 0 and ((single_person and len(keypoint_ids) == 1) or (not single_person)):
                 caption_ids = coco_caption.getAnnIds(imgIds=image_id)
                 captions = coco_caption.loadAnns(ids=caption_ids)
                 keypoints = coco_keypoint.loadAnns(ids=keypoint_ids)
@@ -270,9 +277,8 @@ class HeatmapDataset(torch.utils.data.Dataset):
 
                     # add sentence encoding
                     if text_model is not None:
-                        data['vector'] = [
-                            text_model.get_sentence_vector(caption.get('caption').replace('\n', '')) * 100 / pi for
-                            caption in captions]
+                        data['vector'] = [get_caption_vector(text_model, caption.get('caption')) for caption in
+                                          captions]
                     self.dataset.append(data)
                 else:
                     # each person in the image
@@ -284,9 +290,8 @@ class HeatmapDataset(torch.utils.data.Dataset):
 
                             # add sentence encoding
                             if text_model is not None:
-                                data['vector'] = [
-                                    text_model.get_sentence_vector(caption.get('caption').replace('\n', '')) * 100 / pi
-                                    for caption in captions]
+                                data['vector'] = [get_caption_vector(text_model, caption.get('caption')) for caption in
+                                                  captions]
                             self.dataset.append(data)
 
     def __len__(self):
@@ -301,16 +306,18 @@ class HeatmapDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, index):
         data = self.dataset[index]
-        heatmap = None
-        vector = None
-
-        if self.return_heatmap:
+        if self.caption_only:
+            pass
+        else:
             # change heatmap range from [0,1] to[-1,1]
             heatmap = torch.tensor(self.get_heatmap(data) * 2 - 1, dtype=torch.float32)
         if self.with_vector:
             # randomly select from all matching captions
-            vector = torch.tensor(random.choice(data.get('vector')), dtype=torch.float32).unsqueeze(-1).unsqueeze(-1)
-        return {'heatmap': heatmap, 'vector': vector}
+            vector = torch.tensor(random.choice(data.get('vector')), dtype=torch.float32).unsqueeze_(-1).unsqueeze_(-1)
+            if self.caption_only:
+                return {'vector': vector}
+            return {'heatmap': heatmap, 'vector': vector}
+        return {'heatmap': heatmap}
 
     # get a batch of random caption sentence vectors from the whole dataset
     def get_random_caption_tensor(self, number):
@@ -322,7 +329,7 @@ class HeatmapDataset(torch.utils.data.Dataset):
                 vector = random.choice(random.choice(self.dataset).get('vector'))
                 vector_tensor[i] = torch.tensor(vector, dtype=torch.float32)
 
-        return vector_tensor.unsqueeze(-1).unsqueeze(-1)
+        return vector_tensor.unsqueeze_(-1).unsqueeze_(-1)
 
     # get a batch of random caption from the whole dataset
     def get_random_heatmap_with_caption(self, number):
@@ -351,7 +358,7 @@ class HeatmapDataset(torch.utils.data.Dataset):
                 interpolated_vector = beta * vector + (1 - beta) * vector2
                 vector_tensor[i] = torch.tensor(interpolated_vector, dtype=torch.float32)
 
-        return vector_tensor.unsqueeze(-1).unsqueeze(-1)
+        return vector_tensor.unsqueeze_(-1).unsqueeze_(-1)
 
 
 # generator given noise input
@@ -430,44 +437,6 @@ def weights_init(m):
         nn.init.normal_(m.bias.data, 0.0, 0.02)
 
 
-# a GAN model
-class GAN(object):
-    def __init__(self, generator_path, discriminator_path, device=torch.device('cpu')):
-        # load generator and Discriminator models
-        self.net_g = Generator()
-        self.net_d = Discriminator()
-        self.net_g.load_state_dict(torch.load(generator_path))
-        self.net_d.load_state_dict(torch.load(discriminator_path))
-        self.device = device
-        self.net_g.to(self.device)
-        self.net_d.to(self.device)
-        self.net_g.eval()
-        self.net_d.eval()
-
-    # generate a heatmap from noise
-    def generate(self, noise=None):
-        if noise is None:
-            noise = torch.randn(noise_size, dtype=torch.float32)
-        noise_vector = noise.view(1, noise_size, 1, 1).to(self.device)
-
-        # generate
-        with torch.no_grad():
-            heatmap = self.net_g(noise_vector)
-        return np.array(heatmap.squeeze().tolist()) * 0.5 + 0.5
-
-    # discriminate a heatmap
-    def discriminate(self, heatmap):
-        # heatmap to tensor
-        heatmap = torch.tensor(heatmap * 2 - 1, dtype=torch.float32, device=self.device).view(1, total_keypoints,
-                                                                                              heatmap_size,
-                                                                                              heatmap_size)
-
-        # discriminate
-        with torch.no_grad():
-            score = self.net_d(heatmap)
-        return score.item()
-
-
 # join a generator and a discriminator for display in Tensorboard
 class JoinGAN(nn.Module):
     def __init__(self):
@@ -533,51 +502,6 @@ class JoinGAN2(nn.Module):
 
     def forward(self, noise_vector, sentence_vector):
         return self.d(self.g(noise_vector, sentence_vector), sentence_vector)
-
-
-# second GAN model
-class GAN2(object):
-    def __init__(self, generator_path, discriminator_path, text_model, device=torch.device('cpu')):
-        # load generator and Discriminator models
-        self.net_g = Generator2()
-        self.net_d = Discriminator2()
-        self.net_g.load_state_dict(torch.load(generator_path))
-        self.net_d.load_state_dict(torch.load(discriminator_path))
-        self.device = device
-        self.net_g.to(self.device)
-        self.net_d.to(self.device)
-        self.net_g.eval()
-        self.net_d.eval()
-        self.text_model = text_model
-
-    # generate a heatmap from noise
-    def generate(self, caption, noise=None):
-        if noise is None:
-            noise = torch.randn(noise_size, dtype=torch.float32)
-        noise_vector = noise.view(1, noise_size, 1, 1).to(self.device)
-        sentence_vector = self.text_model.get_sentence_vector(caption.replace('\n', '')) * 100 / pi
-        sentence_vector = torch.tensor(sentence_vector, dtype=torch.float32).view(1, sentence_vector_size, 1, 1).to(
-            self.device)
-
-        # generate
-        with torch.no_grad():
-            heatmap = self.net_g(noise_vector, sentence_vector)
-        return np.array(heatmap.squeeze().tolist()) * 0.5 + 0.5
-
-    # discriminate a heatmap
-    def discriminate(self, heatmap, caption):
-        # heatmap to tensor
-        heatmap = torch.tensor(heatmap * 2 - 1, dtype=torch.float32, device=self.device).view(1, total_keypoints,
-                                                                                              heatmap_size,
-                                                                                              heatmap_size)
-        sentence_vector = self.text_model.get_sentence_vector(caption.replace('\n', '')) * 100 / pi
-        sentence_vector = torch.tensor(sentence_vector, dtype=torch.float32).view(1, sentence_vector_size, 1, 1).to(
-            self.device)
-
-        # discriminate
-        with torch.no_grad():
-            score = self.net_d(heatmap, sentence_vector)
-        return score.item()
 
 
 # style encoder given heatmap
