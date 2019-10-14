@@ -31,7 +31,7 @@ net_d.eval()
 
 # pick a random real sample
 data = random.choice(dataset.dataset)
-heatmap = get_heatmap(data.get('keypoint'), augment=False)
+heatmap = dataset.get_heatmap(data, augment=False)
 heatmap_tensor = torch.tensor(heatmap * 2 - 1, dtype=torch.float32, device=device).unsqueeze_(0)
 file_name = data.get('image').get('file_name')
 caption = random.choice(data.get('caption')).get('caption')

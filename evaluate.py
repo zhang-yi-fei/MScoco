@@ -53,7 +53,7 @@ for j in range(5):
     # get a style encoding
     style_data = random.choice(dataset.dataset)
     style_caption = random.choice(style_data.get('caption')).get('caption')
-    style_heatmap = get_heatmap(style_data.get('keypoint'), False)
+    style_heatmap = dataset.get_heatmap(style_data, False)
     style_heatmap_tensor = torch.tensor(style_heatmap * 2 - 1, dtype=torch.float32, device=device).unsqueeze_(0)
     style_vector = net_s(style_heatmap_tensor)
 
