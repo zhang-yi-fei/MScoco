@@ -5,8 +5,8 @@ import fasttext
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 # read captions and keypoints from files
-coco_caption = COCO(caption_path)
-coco_keypoint = COCO(keypoint_path)
+coco_caption = COCO(caption_path_val)
+coco_keypoint = COCO(keypoint_path_val)
 
 # keypoint connections (skeleton) from annotation file
 skeleton = np.array(coco_keypoint.loadCats(coco_keypoint.getCatIds())[0]['skeleton']) - 1
@@ -17,7 +17,7 @@ text_model = fasttext.load_model(text_model_path)
 # get single-person image dataset
 dataset = HeatmapDataset(coco_keypoint, coco_caption, True)
 
-epoch = 70
+epoch = 2000
 
 # load the GAN
 net_g = Generator2()
@@ -40,7 +40,7 @@ caption_vector = torch.tensor(get_caption_vector(text_model, caption), dtype=tor
 
 # plot a real heatmap
 plt.figure()
-plot_heatmap(heatmap, skeleton, image_folder + file_name, caption)
+plot_heatmap(heatmap, skeleton, image_folder_val + file_name, caption)
 plt.title('(real) score = ' + str(net_d(heatmap_tensor, caption_vector).item()))
 plt.show()
 

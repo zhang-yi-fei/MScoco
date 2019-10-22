@@ -11,6 +11,7 @@ from math import sin, cos, pi
 generator_path = 'models/generator'
 discriminator_path = 'models/discriminator'
 style_encoder_path = 'models/style_encoder'
+content_encoder_path = 'models/content_encoder'
 image_folder = '/media/data/yzhang2/coco/train/coco/images/'
 caption_path = '/media/data/yzhang2/coco/train/coco/annotations/captions_train2017.json'
 keypoint_path = '/media/data/yzhang2/coco/train/coco/annotations/person_keypoints_train2017.json'
@@ -26,7 +27,7 @@ skeleton_colors = ['#b0070a', '#b0070a', '#f40b0f', '#f40b0f', '#ec7f18', '#ad59
                    '#e47ca9']
 
 # ground truth size in heatmap
-sigma = 1
+sigma = 2
 
 # size of heatmap input to network
 heatmap_size = int(64)
@@ -50,6 +51,8 @@ beta = 0.5
 # numbers of channels of the convolutions
 convolution_channel_g = [1024, 512, 256, 128]
 convolution_channel_d = [128, 256, 512, 1024]
+convolution_channel_s = [128, 256, 512, 1024]
+convolution_channel_c = [128, 256, 512, 1024]
 
 noise_size = 128
 g_input_size = noise_size + compress_size
@@ -237,7 +240,7 @@ def plot_heatmap(heatmap, skeleton=None, image_path=None, caption=None):
 
 # return the caption encoding
 def get_caption_vector(text_model, caption):
-    return text_model.get_sentence_vector(caption.replace('\n', '')) * 100 / pi
+    return text_model.get_sentence_vector(caption.replace('\n', '').lower()) * 100 / pi
 
 
 # get a batch of noise vectors
@@ -249,7 +252,8 @@ def get_noise_tensor(number):
 # a dataset that constructs heatmaps and optional matching caption encodings tensors on the fly
 class HeatmapDataset(torch.utils.data.Dataset):
     # a dataset contains keypoints and captions, can add sentence encoding
-    def __init__(self, coco_keypoint, coco_caption, single_person=False, text_model=None, caption_only=False, full_image=False):
+    def __init__(self, coco_keypoint, coco_caption, single_person=False, text_model=None, caption_only=False,
+                 full_image=False):
 
         # get all containing 'person' image ids
         image_ids = coco_keypoint.getImgIds()
@@ -333,14 +337,14 @@ class HeatmapDataset(torch.utils.data.Dataset):
 
     # get a batch of random caption from the whole dataset
     def get_random_heatmap_with_caption(self, number):
-        caption = [[]] * number
+        caption = []
         heatmap = torch.empty((number, total_keypoints, heatmap_size, heatmap_size), dtype=torch.float32)
 
         for i in range(number):
             # randomly select from all images
             data = random.choice(self.dataset)
             heatmap[i] = torch.tensor(self.get_heatmap(data, augment=False) * 2 - 1, dtype=torch.float32)
-            caption[i] = random.choice(data.get('caption')).get('caption')
+            caption.append(random.choice(data.get('caption')).get('caption'))
 
         return {'heatmap': heatmap, 'caption': caption}
 
@@ -511,23 +515,54 @@ class StyleEncoder(nn.Module):
 
         # several layers of convolution, leaky ReLu and batch normalization
         self.main = nn.Sequential(
-            nn.Conv2d(total_keypoints, convolution_channel_d[0], 4, 2, 1, bias=False),
-            nn.BatchNorm2d(convolution_channel_d[0]),
+            nn.Conv2d(total_keypoints, convolution_channel_s[0], 4, 2, 1, bias=False),
+            nn.BatchNorm2d(convolution_channel_s[0]),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(convolution_channel_d[0], convolution_channel_d[1], 4, 2, 1, bias=False),
-            nn.BatchNorm2d(convolution_channel_d[1]),
+            nn.Conv2d(convolution_channel_s[0], convolution_channel_s[1], 4, 2, 1, bias=False),
+            nn.BatchNorm2d(convolution_channel_s[1]),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(convolution_channel_d[1], convolution_channel_d[2], 4, 2, 1, bias=False),
-            nn.BatchNorm2d(convolution_channel_d[2]),
+            nn.Conv2d(convolution_channel_s[1], convolution_channel_s[2], 4, 2, 1, bias=False),
+            nn.BatchNorm2d(convolution_channel_s[2]),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(convolution_channel_d[2], convolution_channel_d[3], 4, 2, 1, bias=False),
-            nn.BatchNorm2d(convolution_channel_d[3]),
+            nn.Conv2d(convolution_channel_s[2], convolution_channel_s[3], 4, 2, 1, bias=False),
+            nn.BatchNorm2d(convolution_channel_s[3]),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(convolution_channel_d[3], noise_size, 4, 1, 0, bias=False),
+            nn.Conv2d(convolution_channel_s[3], noise_size, 4, 1, 0, bias=False),
+
+        )
+
+    def forward(self, input_heatmap):
+        return self.main(input_heatmap)
+
+
+# content encoder given heatmap
+class ContentEncoder(nn.Module):
+    def __init__(self):
+        super(ContentEncoder, self).__init__()
+
+        # several layers of convolution, leaky ReLu and batch normalization
+        self.main = nn.Sequential(
+            nn.Conv2d(total_keypoints, convolution_channel_c[0], 4, 2, 1, bias=False),
+            nn.BatchNorm2d(convolution_channel_c[0]),
+            nn.LeakyReLU(0.2, inplace=True),
+
+            nn.Conv2d(convolution_channel_c[0], convolution_channel_c[1], 4, 2, 1, bias=False),
+            nn.BatchNorm2d(convolution_channel_c[1]),
+            nn.LeakyReLU(0.2, inplace=True),
+
+            nn.Conv2d(convolution_channel_c[1], convolution_channel_c[2], 4, 2, 1, bias=False),
+            nn.BatchNorm2d(convolution_channel_c[2]),
+            nn.LeakyReLU(0.2, inplace=True),
+
+            nn.Conv2d(convolution_channel_c[2], convolution_channel_c[3], 4, 2, 1, bias=False),
+            nn.BatchNorm2d(convolution_channel_c[3]),
+            nn.LeakyReLU(0.2, inplace=True),
+
+            nn.Conv2d(convolution_channel_c[3], sentence_vector_size, 4, 1, 0, bias=False),
 
         )
 

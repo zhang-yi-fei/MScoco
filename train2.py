@@ -13,7 +13,7 @@ device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 batch_size = 128
 learning_rate_g = 0.0001
 learning_rate_d = 0.0001
-start_from_epoch = 1080
+start_from_epoch = 0
 end_in_epoch = 2000
 
 # penalty coefficient
@@ -32,6 +32,8 @@ beta_2 = 0.9
 # read captions and keypoints from files
 coco_caption = COCO(caption_path)
 coco_keypoint = COCO(keypoint_path)
+coco_caption_val = COCO(caption_path_val)
+coco_keypoint_val = COCO(keypoint_path_val)
 
 # keypoint connections (skeleton) from annotation file
 skeleton = np.array(coco_keypoint.loadCats(coco_keypoint.getCatIds())[0].get('skeleton')) - 1
@@ -41,9 +43,15 @@ text_model = fasttext.load_model(text_model_path)
 
 # get the dataset (single person, with captions)
 dataset = HeatmapDataset(coco_keypoint, coco_caption, single_person=True, text_model=text_model)
+dataset_val = HeatmapDataset(coco_keypoint_val, coco_caption_val, single_person=True, text_model=text_model)
 
 # data loader, containing heatmap information
 data_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=workers)
+
+# data to validate
+data_val = enumerate(torch.utils.data.DataLoader(dataset_val, batch_size=dataset_val.__len__())).__next__()[1]
+text_match_val = data_val.get('vector').to(device)
+heatmap_real_val = data_val.get('heatmap').to(device)
 
 net_g = Generator2().to(device)
 net_d = Discriminator2().to(device)
@@ -51,18 +59,18 @@ net_g.apply(weights_init)
 net_d.apply(weights_init)
 
 # load first step (without captions) trained weights
-net_g.load_state_dict(torch.load(generator_path + '_' + f'{start_from_epoch:05d}'), False)
-net_d.load_state_dict(torch.load(discriminator_path + '_' + f'{start_from_epoch:05d}'), False)
+# net_g.load_state_dict(torch.load(generator_path + '_' + f'{start_from_epoch:05d}'), False)
+# net_d.load_state_dict(torch.load(discriminator_path + '_' + f'{start_from_epoch:05d}'), False)
 # net_g.first2.weight.data[0:noise_size] = net_g.first.weight.data
 # net_d.second2.weight.data[:, 0:convolution_channel_d[-1], :, :] = net_d.second.weight.data
 optimizer_g = optim.Adam(net_g.parameters(), lr=learning_rate_g, betas=(beta_1, beta_2))
 optimizer_d = optim.Adam(net_d.parameters(), lr=learning_rate_d, betas=(beta_1, beta_2))
 
-# fixed training data, noise and sentence vectors to see the progression
+# fixed training data (from validation set), noise and sentence vectors to see the progression
 fixed_h = 6
 fixed_w = 5
 fixed_size = fixed_h * fixed_w
-fixed_train = dataset.get_random_heatmap_with_caption(fixed_w)
+fixed_train = dataset_val.get_random_heatmap_with_caption(fixed_w)
 fixed_real = fixed_train.get('heatmap').to(device)
 fixed_real_array = np.array(fixed_real.tolist()) * 0.5 + 0.5
 fixed_caption = fixed_train.get('caption')
@@ -77,7 +85,7 @@ print('training')
 net_g.train()
 net_d.train()
 iteration = 1
-writer = SummaryWriter()
+writer = SummaryWriter(comment='_caption')
 loss_g = torch.tensor(0)
 loss_d = torch.tensor(0)
 
@@ -215,6 +223,51 @@ for e in range(start_from_epoch, end_in_epoch):
         plt.yticks([])
     plt.savefig('figures/fixed_noise_samples_' + f'{e + 1:05d}' + '.png')
     plt.close()
+
+    # validate
+    net_g.eval()
+    net_d.eval()
+
+    # calculate d loss
+    noise_val = get_noise_tensor(dataset_val.__len__()).to(device)
+    text_mismatch_val = dataset_val.get_random_caption_tensor(dataset_val.__len__()).to(device)
+    with torch.no_grad():
+        score_right_val = net_d(heatmap_real_val, text_match_val).detach()
+        score_wrong_val = net_d(heatmap_real_val, text_mismatch_val).detach()
+        heatmap_fake_val = net_g(noise_val, text_match_val).detach()
+        score_fake_val = net_d(heatmap_fake_val, text_match_val).detach()
+    epsilon_val = np.random.rand(dataset_val.__len__())
+    heatmap_sample_val = torch.empty_like(heatmap_real_val)
+    for j in range(dataset_val.__len__()):
+        heatmap_sample_val[j] = epsilon_val[j] * heatmap_real_val[j] + (1 - epsilon_val[j]) * heatmap_fake_val[j]
+    heatmap_sample_val.requires_grad = True
+    text_match_val.requires_grad = True
+    score_sample_val = net_d(heatmap_sample_val, text_match_val)
+    gradient_h_val, gradient_t_val = grad(score_sample_val, [heatmap_sample_val, text_match_val],
+                                          torch.ones_like(score_sample_val), create_graph=True)
+    gradient_norm_val = (gradient_h_val.pow(2).sum((1, 2, 3)) + gradient_t_val.pow(2).sum((1, 2, 3))).sqrt()
+    loss_d_val = (score_fake_val + alpha * score_wrong_val - (1 + alpha) * score_right_val + lamb * (
+        torch.max(torch.tensor(0, dtype=torch.float32, device=device), gradient_norm_val - 1).pow(2))).mean()
+
+    # calculate g loss
+    text_interpolated_val = dataset_val.get_interpolated_caption_tensor(dataset_val.__len__()).to(device)
+    noise_val = get_noise_tensor(dataset_val.__len__()).to(device)
+    noise2_val = get_noise_tensor(dataset_val.__len__()).to(device)
+    with torch.no_grad():
+        heatmap_fake_val = net_g(noise_val, text_match_val).detach()
+        heatmap_interpolated_val = net_g(noise2_val, text_interpolated_val).detach()
+        score_fake_val = net_d(heatmap_fake_val, text_match_val).detach()
+        score_interpolated_val = net_d(heatmap_interpolated_val, text_interpolated_val).detach()
+    loss_g_val = -(score_fake_val + score_interpolated_val).mean()
+
+    # print and log
+    print('epoch ' + str(e + 1) + ' of ' + str(end_in_epoch) + ' val d loss: ' + str(
+        loss_d_val.item()) + ' val g loss: ' + str(loss_g_val.item()))
+    writer.add_scalar('loss_val/d', loss_d_val, e)
+    writer.add_scalar('loss_val/g', loss_g_val, e)
+
+    net_g.train()
+    net_d.train()
 
     # log
     # writer.add_images('heatmap', np.amax(fixed_fake, 1, keepdims=True), e, dataformats='NCHW')
