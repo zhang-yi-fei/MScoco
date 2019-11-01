@@ -11,7 +11,7 @@ device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 # training parameters
 batch_size = 128
 learning_rate = 0.001
-epoch = 2000
+epoch = 5000
 
 # ADAM solver
 beta_1 = 0.9
@@ -38,8 +38,8 @@ data_val = enumerate(torch.utils.data.DataLoader(dataset_val, batch_size=dataset
 text_val = data_val.get('vector').to(device)
 heatmap_val = data_val.get('heatmap').to(device)
 
-# style encoder
-net_c = ContentEncoder().to(device)
+# content encoder
+net_c = Encoder(sentence_vector_size, True).to(device)
 net_c.apply(weights_init)
 optimizer_c = optim.Adam(net_c.parameters(), lr=learning_rate, betas=(beta_1, beta_2))
 criterion = nn.MSELoss()
@@ -50,9 +50,6 @@ print(start)
 print('training')
 net_c.train()
 writer = SummaryWriter(comment='_content')
-
-# log
-writer.add_graph(net_c, dataset.get_random_heatmap_with_caption(batch_size).get('heatmap').to(device))
 
 # number of batches
 batch_number = len(data_loader)
@@ -67,7 +64,6 @@ for e in range(epoch):
         # get heatmaps and sentence vectors
         text = batch.get('vector')
         heatmap = batch.get('heatmap')
-        current_batch_size = len(text)
 
         text = text.to(device)
         heatmap = heatmap.to(device)

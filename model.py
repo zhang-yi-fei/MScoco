@@ -8,10 +8,10 @@ import matplotlib.colors
 from skimage import io
 from math import sin, cos, pi
 
-generator_path = 'models/generator'
-discriminator_path = 'models/discriminator'
-style_encoder_path = 'models/style_encoder'
-content_encoder_path = 'models/content_encoder'
+generator_path = 'models/generator_s'
+discriminator_path = 'models/discriminator_s'
+style_encoder_path = 'models/style_encoder_s'
+content_encoder_path = 'models/content_encoder_s'
 image_folder = '/media/data/yzhang2/coco/train/coco/images/'
 caption_path = '/media/data/yzhang2/coco/train/coco/annotations/captions_train2017.json'
 keypoint_path = '/media/data/yzhang2/coco/train/coco/annotations/person_keypoints_train2017.json'
@@ -49,10 +49,9 @@ compress_size = 128
 beta = 0.5
 
 # numbers of channels of the convolutions
-convolution_channel_g = [1024, 512, 256, 128]
-convolution_channel_d = [128, 256, 512, 1024]
-convolution_channel_s = [128, 256, 512, 1024]
-convolution_channel_c = [128, 256, 512, 1024]
+convolution_channel_g = [512, 256, 128, 64]
+convolution_channel_d = [64, 128, 256, 512]
+convolution_channel_e = [64, 128, 256, 512]
 
 noise_size = 128
 g_input_size = noise_size + compress_size
@@ -64,7 +63,7 @@ y_grid = np.repeat(np.array([range(heatmap_size)]).transpose(), heatmap_size, ax
 empty = np.zeros([heatmap_size, heatmap_size], dtype='float32')
 
 # to decide whether a keypoint is in the heatmap
-heatmap_threshold = 0.1
+heatmap_threshold = 0.2
 
 # have more than this number of keypoints to be included
 keypoint_threshold = 7
@@ -252,14 +251,12 @@ def get_noise_tensor(number):
 # a dataset that constructs heatmaps and optional matching caption encodings tensors on the fly
 class HeatmapDataset(torch.utils.data.Dataset):
     # a dataset contains keypoints and captions, can add sentence encoding
-    def __init__(self, coco_keypoint, coco_caption, single_person=False, text_model=None, caption_only=False,
-                 full_image=False):
+    def __init__(self, coco_keypoint, coco_caption, single_person=False, text_model=None, full_image=False):
 
         # get all containing 'person' image ids
         image_ids = coco_keypoint.getImgIds()
 
         self.with_vector = (text_model is not None)
-        self.caption_only = caption_only
         self.full_image = full_image
         self.dataset = []
 
@@ -310,16 +307,12 @@ class HeatmapDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, index):
         data = self.dataset[index]
-        if self.caption_only:
-            pass
-        else:
-            # change heatmap range from [0,1] to[-1,1]
-            heatmap = torch.tensor(self.get_heatmap(data) * 2 - 1, dtype=torch.float32)
+
+        # change heatmap range from [0,1] to[-1,1]
+        heatmap = torch.tensor(self.get_heatmap(data) * 2 - 1, dtype=torch.float32)
         if self.with_vector:
             # randomly select from all matching captions
             vector = torch.tensor(random.choice(data.get('vector')), dtype=torch.float32).unsqueeze_(-1).unsqueeze_(-1)
-            if self.caption_only:
-                return {'vector': vector}
             return {'heatmap': heatmap, 'vector': vector}
         return {'heatmap': heatmap}
 
@@ -441,17 +434,6 @@ def weights_init(m):
         nn.init.normal_(m.bias.data, 0.0, 0.02)
 
 
-# join a generator and a discriminator for display in Tensorboard
-class JoinGAN(nn.Module):
-    def __init__(self):
-        super(JoinGAN, self).__init__()
-        self.g = Generator()
-        self.d = Discriminator()
-
-    def forward(self, noise_vector):
-        return self.d(self.g(noise_vector))
-
-
 # generator given noise and text encoding input
 class Generator2(Generator):
     def __init__(self):
@@ -497,41 +479,30 @@ class Discriminator2(Discriminator):
         return self.third(self.second2(tensor))
 
 
-# join a generator and a discriminator for display in Tensorboard
-class JoinGAN2(nn.Module):
-    def __init__(self):
-        super(JoinGAN2, self).__init__()
-        self.g = Generator2()
-        self.d = Discriminator2()
-
-    def forward(self, noise_vector, sentence_vector):
-        return self.d(self.g(noise_vector, sentence_vector), sentence_vector)
-
-
-# style encoder given heatmap
-class StyleEncoder(nn.Module):
-    def __init__(self):
-        super(StyleEncoder, self).__init__()
+# content/style encoder given heatmap
+class Encoder(nn.Module):
+    def __init__(self, encoding_size, track_running_stats):
+        super(Encoder, self).__init__()
 
         # several layers of convolution, leaky ReLu and batch normalization
         self.main = nn.Sequential(
-            nn.Conv2d(total_keypoints, convolution_channel_s[0], 4, 2, 1, bias=False),
-            nn.BatchNorm2d(convolution_channel_s[0]),
+            nn.Conv2d(total_keypoints, convolution_channel_e[0], 4, 2, 1, bias=False),
+            nn.BatchNorm2d(convolution_channel_e[0], track_running_stats=track_running_stats),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(convolution_channel_s[0], convolution_channel_s[1], 4, 2, 1, bias=False),
-            nn.BatchNorm2d(convolution_channel_s[1]),
+            nn.Conv2d(convolution_channel_e[0], convolution_channel_e[1], 4, 2, 1, bias=False),
+            nn.BatchNorm2d(convolution_channel_e[1], track_running_stats=track_running_stats),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(convolution_channel_s[1], convolution_channel_s[2], 4, 2, 1, bias=False),
-            nn.BatchNorm2d(convolution_channel_s[2]),
+            nn.Conv2d(convolution_channel_e[1], convolution_channel_e[2], 4, 2, 1, bias=False),
+            nn.BatchNorm2d(convolution_channel_e[2], track_running_stats=track_running_stats),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(convolution_channel_s[2], convolution_channel_s[3], 4, 2, 1, bias=False),
-            nn.BatchNorm2d(convolution_channel_s[3]),
+            nn.Conv2d(convolution_channel_e[2], convolution_channel_e[3], 4, 2, 1, bias=False),
+            nn.BatchNorm2d(convolution_channel_e[3], track_running_stats=track_running_stats),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(convolution_channel_s[3], noise_size, 4, 1, 0, bias=False),
+            nn.Conv2d(convolution_channel_e[3], encoding_size, 4, 1, 0, bias=False),
 
         )
 
@@ -539,32 +510,52 @@ class StyleEncoder(nn.Module):
         return self.main(input_heatmap)
 
 
-# content encoder given heatmap
-class ContentEncoder(nn.Module):
-    def __init__(self):
-        super(ContentEncoder, self).__init__()
+# get max index of a heatmap
+def heatmap_to_max_index(heatmap):
+    max_index = np.array([np.unravel_index(np.argmax(h), h.shape) for h in heatmap])
 
-        # several layers of convolution, leaky ReLu and batch normalization
-        self.main = nn.Sequential(
-            nn.Conv2d(total_keypoints, convolution_channel_c[0], 4, 2, 1, bias=False),
-            nn.BatchNorm2d(convolution_channel_c[0]),
-            nn.LeakyReLU(0.2, inplace=True),
+    # set the index of heatmap below threshold to [0,0]
+    for i in range(len(heatmap)):
+        if heatmap[i][tuple(max_index[i])] < heatmap_threshold:
+            max_index[i][:] = heatmap_size / 2
+    return max_index
 
-            nn.Conv2d(convolution_channel_c[0], convolution_channel_c[1], 4, 2, 1, bias=False),
-            nn.BatchNorm2d(convolution_channel_c[1]),
-            nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(convolution_channel_c[1], convolution_channel_c[2], 4, 2, 1, bias=False),
-            nn.BatchNorm2d(convolution_channel_c[2]),
-            nn.LeakyReLU(0.2, inplace=True),
+# distance between two heatmaps: the sum of the distances between maximum points of all 17 keypoint heatmaps
+def heatmap_distance(heatmap_max_index, heatmap_max_index2):
+    return sum(np.sqrt(np.sum((heatmap_max_index - heatmap_max_index2) ** 2, axis=1)))
 
-            nn.Conv2d(convolution_channel_c[2], convolution_channel_c[3], 4, 2, 1, bias=False),
-            nn.BatchNorm2d(convolution_channel_c[3]),
-            nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(convolution_channel_c[3], sentence_vector_size, 4, 1, 0, bias=False),
+# find the nearest neighbor distance of a heatmap in a list of heatmaps
+def nearest_neighbor(heatmap_max_index, heatmap_max_index_list):
+    distance = heatmap_distance(heatmap_max_index, heatmap_max_index_list[0])
 
-        )
+    # find nearest neighbor
+    for heatmap_max_index2 in heatmap_max_index_list[1:]:
+        new_distance = heatmap_distance(heatmap_max_index, heatmap_max_index2)
+        if new_distance < distance:
+            distance = new_distance
+    return distance
 
-    def forward(self, input_heatmap):
-        return self.main(input_heatmap)
+
+# calculate the one-nearest-neighbor accuracy
+def one_nearest_neighbor(heatmap_max_index_list, heatmap_max_index_list2):
+    size = len(heatmap_max_index_list)
+
+    # number of correct classifications
+    count = 0
+    for i in range(size):
+        # a heatmap from the first list
+        if nearest_neighbor(heatmap_max_index_list[i],
+                            heatmap_max_index_list[0:i] + heatmap_max_index_list[i + 1:]) < nearest_neighbor(
+            heatmap_max_index_list[i], heatmap_max_index_list2):
+            count = count + 1
+
+        # a heatmap from the second list
+        if nearest_neighbor(heatmap_max_index_list2[i],
+                            heatmap_max_index_list2[0:i] + heatmap_max_index_list2[i + 1:]) < nearest_neighbor(
+            heatmap_max_index_list2[i], heatmap_max_index_list):
+            count = count + 1
+
+    # accuracy
+    return count / size / 2

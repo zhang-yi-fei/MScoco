@@ -89,10 +89,6 @@ writer = SummaryWriter(comment='_caption')
 loss_g = torch.tensor(0)
 loss_d = torch.tensor(0)
 
-# log
-writer.add_graph(JoinGAN2().to(device),
-                 (fixed_noise.repeat_interleave(fixed_w, dim=0), fixed_text.repeat(fixed_h, 1, 1, 1)))
-
 # number of batches
 batch_number = len(data_loader)
 
@@ -148,12 +144,6 @@ for e in range(start_from_epoch, end_in_epoch):
 
         # log
         writer.add_scalar('loss/d', loss_d, batch_number * e + i)
-        # writer.add_histogram('score/real', score_right, batch_number * e + i)
-        # writer.add_histogram('score/wrong', score_wrong, batch_number * e + i)
-        # writer.add_histogram('score/fake', score_fake, batch_number * e + i)
-        # writer.add_histogram('gradient_norm', gradient_norm, batch_number * e + i)
-        # writer.add_histogram('wasserstein_distance', score_fake + alpha * score_wrong - (1 + alpha) * score_right,
-        #                      batch_number * e + i)
 
         # second, optimize generator
         if iteration == k:
@@ -183,8 +173,6 @@ for e in range(start_from_epoch, end_in_epoch):
 
             # log
             writer.add_scalar('loss/g', loss_g, batch_number * e + i)
-            # writer.add_histogram('score/fake_2', score_fake, batch_number * e + i)
-            # writer.add_histogram('score/interpolated', score_interpolated, batch_number * e + i)
 
         # print progress
         print('epoch ' + str(e + 1) + ' of ' + str(end_in_epoch) + ' batch ' + str(i + 1) + ' of ' + str(
@@ -261,17 +249,13 @@ for e in range(start_from_epoch, end_in_epoch):
     loss_g_val = -(score_fake_val + score_interpolated_val).mean()
 
     # print and log
-    print('epoch ' + str(e + 1) + ' of ' + str(end_in_epoch) + ' val d loss: ' + str(
-        loss_d_val.item()) + ' val g loss: ' + str(loss_g_val.item()))
-    writer.add_scalar('loss_val/d', loss_d_val, e)
+    print('epoch ' + str(e + 1) + ' of ' + str(end_in_epoch) + ' val g loss: ' + str(
+        loss_g_val.item()) + ' val d loss: ' + str(loss_d_val.item()))
     writer.add_scalar('loss_val/g', loss_g_val, e)
+    writer.add_scalar('loss_val/d', loss_d_val, e)
 
     net_g.train()
     net_d.train()
-
-    # log
-    # writer.add_images('heatmap', np.amax(fixed_fake, 1, keepdims=True), e, dataformats='NCHW')
-    # writer.add_figure('heatmaps', f, e)
 
 print('\nfinished')
 print(datetime.now())

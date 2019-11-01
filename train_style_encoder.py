@@ -28,9 +28,8 @@ coco_keypoint_val = COCO(keypoint_path_val)
 text_model = fasttext.load_model(text_model_path)
 
 # get the dataset (single person, with captions)
-dataset = HeatmapDataset(coco_keypoint, coco_caption, single_person=True, text_model=text_model, caption_only=True)
-dataset_val = HeatmapDataset(coco_keypoint_val, coco_caption_val, single_person=True, text_model=text_model,
-                             caption_only=True)
+dataset = HeatmapDataset(coco_keypoint, coco_caption, single_person=True, text_model=text_model)
+dataset_val = HeatmapDataset(coco_keypoint_val, coco_caption_val, single_person=True, text_model=text_model)
 
 # data loader, containing heatmap information
 data_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=workers)
@@ -46,7 +45,7 @@ net_g.to(device)
 net_g.eval()
 
 # style encoder
-net_s = StyleEncoder().to(device)
+net_s = Encoder(noise_size, False).to(device)
 net_s.apply(weights_init)
 optimizer_s = optim.Adam(net_s.parameters(), lr=learning_rate, betas=(beta_1, beta_2))
 criterion = nn.MSELoss()
@@ -57,10 +56,6 @@ print(start)
 print('training')
 net_s.train()
 writer = SummaryWriter(comment='_style')
-
-# log
-writer.add_graph(net_s, net_g(get_noise_tensor(batch_size).to(device),
-                              dataset.get_random_caption_tensor(batch_size).to(device)))
 
 # number of batches
 batch_number = len(data_loader)
