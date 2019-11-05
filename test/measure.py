@@ -21,7 +21,7 @@ dataset = HeatmapDataset(coco_keypoint, coco_caption, True)
 dataset_val = HeatmapDataset(coco_keypoint_val, coco_caption_val, True)
 
 gan_epoch = 2000
-ce_epoch = 2000
+ce_epoch = 5000
 
 # load the GAN and the content encoder
 net_g = Generator2()

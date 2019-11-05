@@ -18,7 +18,7 @@ text_model = fasttext.load_model(text_model_path)
 dataset = HeatmapDataset(coco_keypoint, coco_caption, True)
 
 gan_epoch = 2000
-se_epoch = 2000
+se_epoch = 5000
 
 # load the GAN and the style encoder
 net_g = Generator2()

@@ -8,10 +8,10 @@ import matplotlib.colors
 from skimage import io
 from math import sin, cos, pi
 
-generator_path = 'models/generator_s'
-discriminator_path = 'models/discriminator_s'
-style_encoder_path = 'models/style_encoder_s'
-content_encoder_path = 'models/content_encoder_s'
+generator_path = 'models/generator'
+discriminator_path = 'models/discriminator'
+style_encoder_path = 'models/style_encoder'
+content_encoder_path = 'models/content_encoder'
 image_folder = '/media/data/yzhang2/coco/train/coco/images/'
 caption_path = '/media/data/yzhang2/coco/train/coco/annotations/captions_train2017.json'
 keypoint_path = '/media/data/yzhang2/coco/train/coco/annotations/person_keypoints_train2017.json'
@@ -51,7 +51,7 @@ beta = 0.5
 # numbers of channels of the convolutions
 convolution_channel_g = [512, 256, 128, 64]
 convolution_channel_d = [64, 128, 256, 512]
-convolution_channel_e = [64, 128, 256, 512]
+convolution_channel_e = [128, 256, 512, 1024]
 
 noise_size = 128
 g_input_size = noise_size + compress_size

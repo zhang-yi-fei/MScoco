@@ -17,7 +17,7 @@ text_model = fasttext.load_model(text_model_path)
 # get single-person image dataset
 dataset = HeatmapDataset(coco_keypoint, coco_caption, True)
 
-ce_epoch = 2000
+ce_epoch = 5000
 
 # load the content encoder
 net_c = Encoder(sentence_vector_size, True)
