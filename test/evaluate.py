@@ -86,8 +86,8 @@ with torch.no_grad():
     # sentence interpolation
 
     # some captions
-    first_caption = ['The man is standing', 'The woman is sitting', 'The boy is sleeping in bed']
-    second_caption = ['The man is running', 'The woman is standing', 'The boy is sitting on a chair']
+    first_caption = ['The man is standing on the beach', 'The woman is sitting behind a table', 'The boy has a tennis racket in his hands']
+    second_caption = ['The man is holding a surfboard', 'The woman is eating a pizza', 'The boy is going to serve the ball']
     first_vector = [
         torch.tensor(get_caption_vector(text_model, caption), dtype=torch.float32, device=device).unsqueeze_(
             -1).unsqueeze_(-1).unsqueeze_(0) for caption in first_caption]
