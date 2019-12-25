@@ -134,7 +134,7 @@ def get_heatmap(keypoint, augment=True):
         # labeled keypoints' v > 0
         if v[i] > 0:
             # ground truth in heatmap is normal distribution shaped
-            heatmap[i] = np.exp(-((x_grid - x[i]) ** 2 + (y_grid - y[i]) ** 2) / sigma ** 2, dtype='float32')
+            heatmap[i] = np.exp(-((x_grid - x[i]) ** 2 + (y_grid - y[i]) ** 2) / (2 * sigma ** 2), dtype='float32')
         else:
             heatmap[i] = empty.copy()
 
@@ -180,7 +180,7 @@ def get_full_image_heatmap(image, keypoints, augment=True):
             # labeled keypoints' v > 0
             if v[i] > 0:
                 # ground truth in heatmap is normal distribution shaped
-                heatmap[j][i] = np.exp(-((x_grid - x[i]) ** 2 + (y_grid - y[i]) ** 2) / sigma ** 2, dtype='float32')
+                heatmap[j][i] = np.exp(-((x_grid - x[i]) ** 2 + (y_grid - y[i]) ** 2) / (2 * sigma ** 2), dtype='float32')
             else:
                 heatmap[j][i] = empty.copy()
 

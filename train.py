@@ -33,20 +33,6 @@ coco_keypoint_val = COCO(keypoint_path_val)
 # keypoint connections (skeleton) from annotation file
 skeleton = np.array(coco_keypoint.loadCats(coco_keypoint.getCatIds())[0].get('skeleton')) - 1
 
-# plot the reference heatmap
-x = np.array([5, 6, 4, 7, 3, 7, 3, 8, 2, 9, 1, 7, 3, 8, 2, 9, 1]) / 10 * heatmap_size
-y = np.array([2, 1, 1, 2, 2, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9]) / 10 * heatmap_size
-reference_heatmap = np.empty((total_keypoints, heatmap_size, heatmap_size), dtype='float32')
-for i in range(total_keypoints):
-    reference_heatmap[i] = np.exp(-((x_grid - x[i]) ** 2 + (y_grid - y[i]) ** 2) / sigma ** 2, dtype='float32')
-plt.figure()
-plot_heatmap(reference_heatmap, skeleton)
-plt.title(None)
-plt.xticks([])
-plt.yticks([])
-plt.savefig('reference_heatmap' + '.png')
-plt.close()
-
 # get the dataset
 dataset = HeatmapDataset(coco_keypoint, coco_caption)
 dataset_val = HeatmapDataset(coco_keypoint_val, coco_caption_val)
