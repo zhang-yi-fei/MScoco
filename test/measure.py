@@ -20,18 +20,13 @@ text_model = fasttext.load_model(text_model_path)
 dataset = HeatmapDataset(coco_keypoint, coco_caption, True)
 dataset_val = HeatmapDataset(coco_keypoint_val, coco_caption_val, True)
 
-gan_epoch = 2000
-ce_epoch = 5000
+gan_epoch = 1200
 
 # load the GAN and the content encoder
 net_g = Generator2()
-net_c = Encoder(sentence_vector_size, True)
 net_g.load_state_dict(torch.load(generator_path + '_' + f'{gan_epoch:05d}'))
-net_c.load_state_dict(torch.load(content_encoder_path + '_' + f'{ce_epoch:05d}'))
 net_g.to(device)
-net_c.to(device)
 net_g.eval()
-net_c.eval()
 
 with torch.no_grad():
     real_max_index = []
@@ -77,42 +72,5 @@ with torch.no_grad():
     plt.legend(['real', 'fake'])
     plt.title('nearest neighbor distances')
     plt.xlabel('distance')
-    plt.ylabel('frequency')
-    plt.show()
-
-    # classification performance measure
-
-    error_real = []
-    error_fake = []
-    criterion = nn.MSELoss()
-
-    # one test list of heatmaps
-    for data in dataset_val.dataset:
-        real_heatmap = torch.tensor(dataset_val.get_heatmap(data, False) * 2 - 1, dtype=torch.float32,
-                                    device=device).unsqueeze_(0)
-        real_caption = random.choice(data.get('caption')).get('caption')
-        real_vector = torch.tensor(get_caption_vector(text_model, real_caption), dtype=torch.float32,
-                                   device=device).unsqueeze_(-1).unsqueeze_(-1).unsqueeze_(0)
-        fake_caption = random.choice(data.get('caption')).get('caption')
-        fake_vector = torch.tensor(get_caption_vector(text_model, fake_caption), dtype=torch.float32,
-                                   device=device).unsqueeze_(-1).unsqueeze_(-1).unsqueeze_(0)
-        noise = get_noise_tensor(1).to(device)
-        fake_heatmap = net_g(noise, fake_vector).detach()
-        real_content = net_c(real_heatmap).detach()
-        fake_content = net_c(fake_heatmap).detach()
-        error_real.append(criterion(real_vector, real_content).item())
-        error_fake.append(criterion(fake_vector, fake_content).item())
-
-    print('Classification Performance')
-    print('mean error (real):' + str(np.mean(error_real)))
-    print('mean error (fake):' + str(np.mean(error_fake)))
-
-    # plot
-    plt.figure()
-    plt.hist(error_real, 100, alpha=0.5)
-    plt.hist(error_fake, 100, alpha=0.5)
-    plt.legend(['real', 'fake'])
-    plt.title('sentence/content vector errors')
-    plt.xlabel('error')
     plt.ylabel('frequency')
     plt.show()

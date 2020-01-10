@@ -37,6 +37,8 @@ skeleton = np.array(coco_keypoint.loadCats(coco_keypoint.getCatIds())[0].get('sk
 dataset = HeatmapDataset(coco_keypoint, coco_caption)
 dataset_val = HeatmapDataset(coco_keypoint_val, coco_caption_val)
 
+dataset_val.dataset=dataset_val.dataset[0:100]
+
 # data loader, containing heatmap information
 data_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=workers)
 

@@ -49,8 +49,8 @@ compress_size = 128
 beta = 0.5
 
 # numbers of channels of the convolutions
-convolution_channel_g = [512, 256, 128, 64]
-convolution_channel_d = [64, 128, 256, 512]
+convolution_channel_g = [256, 128, 64, 32]
+convolution_channel_d = [32, 64, 128, 256]
 convolution_channel_e = [128, 256, 512, 1024]
 
 noise_size = 128
@@ -239,7 +239,7 @@ def plot_heatmap(heatmap, skeleton=None, image_path=None, caption=None):
 
 # return the caption encoding
 def get_caption_vector(text_model, caption):
-    return text_model.get_sentence_vector(caption.replace('\n', '').lower()) * 100 / pi
+    return text_model.get_sentence_vector(caption.replace('\n', '').lower()) * 30
 
 
 # get a batch of noise vectors

@@ -11,10 +11,10 @@ device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 # training parameters
 batch_size = 128
-learning_rate_g = 0.0001
-learning_rate_d = 0.0001
+learning_rate_g = 0.0004
+learning_rate_d = 0.0004
 start_from_epoch = 0
-end_in_epoch = 2000
+end_in_epoch = 999
 
 # penalty coefficient
 lamb = 150
@@ -77,6 +77,34 @@ fixed_caption = fixed_train.get('caption')
 fixed_noise = get_noise_tensor(fixed_h).to(device)
 fixed_text = torch.tensor([get_caption_vector(text_model, caption) for caption in fixed_caption], dtype=torch.float32,
                           device=device).unsqueeze(-1).unsqueeze(-1)
+
+# plot and save generated samples from fixed noise (before training begins)
+net_g.eval()
+net_d.eval()
+with torch.no_grad():
+    fixed_fake = net_g(fixed_noise.repeat_interleave(fixed_w, dim=0), fixed_text.repeat(fixed_h, 1, 1, 1))
+    fixed_score_fake = net_d(fixed_fake, fixed_text.repeat(fixed_h, 1, 1, 1))
+    fixed_score_real = net_d(fixed_real, fixed_text)
+net_g.train()
+net_d.train()
+fixed_fake = np.array(fixed_fake.tolist()) * 0.5 + 0.5
+f = plt.figure(figsize=(19.2, 12))
+for sample in range(fixed_w):
+    plt.subplot(fixed_h + 1, fixed_w, sample + 1)
+    plot_heatmap(fixed_real_array[sample], skeleton)
+    plt.title(fixed_caption[sample][0:30] + '\n' + fixed_caption[sample][30:])
+    plt.xlabel('(real)')
+    plt.xticks([])
+    plt.yticks([])
+for sample in range(fixed_size):
+    plt.subplot(fixed_h + 1, fixed_w, fixed_w + sample + 1)
+    plot_heatmap(fixed_fake[sample], skeleton)
+    plt.title(None)
+    plt.xlabel('(fake)')
+    plt.xticks([])
+    plt.yticks([])
+plt.savefig('figures/fixed_noise_samples_' + f'{start_from_epoch:05d}' + '_new.png')
+plt.close()
 
 # train
 start = datetime.now()
@@ -143,7 +171,7 @@ for e in range(start_from_epoch, end_in_epoch):
         optimizer_d.step()
 
         # log
-        writer.add_scalar('loss/d', loss_d, batch_number * e + i)
+        writer.add_scalar('loss/d', loss_d, batch_number * (e - start_from_epoch) + i)
 
         # second, optimize generator
         if iteration == k:
@@ -172,7 +200,7 @@ for e in range(start_from_epoch, end_in_epoch):
             optimizer_g.step()
 
             # log
-            writer.add_scalar('loss/g', loss_g, batch_number * e + i)
+            writer.add_scalar('loss/g', loss_g, batch_number * (e - start_from_epoch) + i)
 
         # print progress
         print('epoch ' + str(e + 1) + ' of ' + str(end_in_epoch) + ' batch ' + str(i + 1) + ' of ' + str(
@@ -199,14 +227,14 @@ for e in range(start_from_epoch, end_in_epoch):
         plt.subplot(fixed_h + 1, fixed_w, sample + 1)
         plot_heatmap(fixed_real_array[sample], skeleton)
         plt.title(fixed_caption[sample][0:30] + '\n' + fixed_caption[sample][30:])
-        plt.xlabel('(real) score = ' + str(fixed_score_real[sample].item()))
+        plt.xlabel('(real)')
         plt.xticks([])
         plt.yticks([])
     for sample in range(fixed_size):
         plt.subplot(fixed_h + 1, fixed_w, fixed_w + sample + 1)
         plot_heatmap(fixed_fake[sample], skeleton)
         plt.title(None)
-        plt.xlabel('(fake) score = ' + str(fixed_score_fake[sample].item()))
+        plt.xlabel('(fake)')
         plt.xticks([])
         plt.yticks([])
     plt.savefig('figures/fixed_noise_samples_' + f'{e + 1:05d}' + '.png')
@@ -251,8 +279,8 @@ for e in range(start_from_epoch, end_in_epoch):
     # print and log
     print('epoch ' + str(e + 1) + ' of ' + str(end_in_epoch) + ' val g loss: ' + str(
         loss_g_val.item()) + ' val d loss: ' + str(loss_d_val.item()))
-    writer.add_scalar('loss_val/g', loss_g_val, e)
-    writer.add_scalar('loss_val/d', loss_d_val, e)
+    writer.add_scalar('loss_val/g', loss_g_val, e - start_from_epoch)
+    writer.add_scalar('loss_val/d', loss_d_val, e - start_from_epoch)
 
     net_g.train()
     net_d.train()
