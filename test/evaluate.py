@@ -17,77 +17,22 @@ text_model = fasttext.load_model(text_model_path)
 # get single-person image dataset
 dataset = HeatmapDataset(coco_keypoint, coco_caption, True)
 
-gan_epoch = 2000
-se_epoch = 5000
+gan_epoch = 1200
 
-# load the GAN and the style encoder
+# load the GAN
 net_g = Generator2()
-net_s = Encoder(noise_size, False)
 net_g.load_state_dict(torch.load(generator_path + '_' + f'{gan_epoch:05d}'))
-net_s.load_state_dict(torch.load(style_encoder_path + '_' + f'{se_epoch:05d}'))
 net_g.to(device)
-net_s.to(device)
 net_g.eval()
-net_s.eval()
 
 with torch.no_grad():
-    # style transfer
-
-    # some captions
-    new_caption = []
-    caption_vector = []
-    new_heatmap = []
-    data = random.sample(dataset.dataset, 6)
-    for i in range(6):
-        new_caption.append(random.choice(data[i].get('caption')).get('caption'))
-    new_caption.append('The man is standing')
-    new_caption.append('The woman is walking')
-    new_caption.append('The boy is playing computer games')
-    for caption in new_caption:
-        caption_vector.append(
-            torch.tensor(get_caption_vector(text_model, caption), dtype=torch.float32, device=device).unsqueeze_(
-                -1).unsqueeze_(-1).unsqueeze_(0))
-
-    plt.figure()
-    plt.subplots_adjust(top=0.975, bottom=0.0, left=0.11, right=0.9, hspace=0.0, wspace=0.0)
-    for i in range(6):
-        new_heatmap.clear()
-
-        # get a style encoding
-        style_data = random.choice(dataset.dataset)
-        style_heatmap = dataset.get_heatmap(style_data, False)
-        style_heatmap_tensor = torch.tensor(style_heatmap * 2 - 1, dtype=torch.float32, device=device).unsqueeze_(0)
-        style_vector = net_s(style_heatmap_tensor)
-
-        # transfer the style to the new captions
-        for vector in caption_vector:
-            new_heatmap.append(np.array(net_g(style_vector, vector).squeeze().tolist()) * 0.5 + 0.5)
-
-        # style heatmap
-        plt.subplot(10, 10, i + 5)
-        plot_heatmap(style_heatmap, skeleton)
-        plt.xticks([])
-        plt.yticks([])
-        if i == 2:
-            plt.title('style images')
-        else:
-            plt.title('')
-
-        # style transferred heatmaps
-        for j in range(9):
-            plt.subplot(10, 10, j * 10 + 15 + i)
-            plot_heatmap(new_heatmap[j], skeleton)
-            plt.xticks([])
-            plt.yticks([])
-            plt.title('')
-            if i == 0:
-                plt.ylabel(new_caption[j], rotation='horizontal', ha='right')
-
     # sentence interpolation
 
     # some captions
-    first_caption = ['The man is standing on the beach', 'The woman is sitting behind a table', 'The boy has a tennis racket in his hands']
-    second_caption = ['The man is holding a surfboard', 'The woman is eating a pizza', 'The boy is going to serve the ball']
+    first_caption = ['The man is standing on the beach', 'The woman is sitting behind a table',
+                     'The boy has a tennis racket in his hands']
+    second_caption = ['The man is holding a surfboard', 'The woman is eating a pizza',
+                      'The boy is going to serve the ball']
     first_vector = [
         torch.tensor(get_caption_vector(text_model, caption), dtype=torch.float32, device=device).unsqueeze_(
             -1).unsqueeze_(-1).unsqueeze_(0) for caption in first_caption]

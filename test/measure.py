@@ -22,7 +22,7 @@ dataset_val = HeatmapDataset(coco_keypoint_val, coco_caption_val, True)
 
 gan_epoch = 1200
 
-# load the GAN and the content encoder
+# load the GAN
 net_g = Generator2()
 net_g.load_state_dict(torch.load(generator_path + '_' + f'{gan_epoch:05d}'))
 net_g.to(device)

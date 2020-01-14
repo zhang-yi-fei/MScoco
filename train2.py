@@ -13,8 +13,8 @@ device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 batch_size = 128
 learning_rate_g = 0.0004
 learning_rate_d = 0.0004
-start_from_epoch = 0
-end_in_epoch = 999
+start_from_epoch = 200
+end_in_epoch = 1200
 
 # penalty coefficient
 lamb = 150
@@ -59,10 +59,10 @@ net_g.apply(weights_init)
 net_d.apply(weights_init)
 
 # load first step (without captions) trained weights
-# net_g.load_state_dict(torch.load(generator_path + '_' + f'{start_from_epoch:05d}'), False)
-# net_d.load_state_dict(torch.load(discriminator_path + '_' + f'{start_from_epoch:05d}'), False)
-# net_g.first2.weight.data[0:noise_size] = net_g.first.weight.data
-# net_d.second2.weight.data[:, 0:convolution_channel_d[-1], :, :] = net_d.second.weight.data
+net_g.load_state_dict(torch.load(generator_path + '_' + f'{start_from_epoch:05d}'), False)
+net_d.load_state_dict(torch.load(discriminator_path + '_' + f'{start_from_epoch:05d}'), False)
+net_g.first2.weight.data[0:noise_size] = net_g.first.weight.data
+net_d.second2.weight.data[:, 0:convolution_channel_d[-1], :, :] = net_d.second.weight.data
 optimizer_g = optim.Adam(net_g.parameters(), lr=learning_rate_g, betas=(beta_1, beta_2))
 optimizer_d = optim.Adam(net_d.parameters(), lr=learning_rate_d, betas=(beta_1, beta_2))
 

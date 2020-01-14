@@ -6,7 +6,7 @@ from torch.utils.tensorboard import SummaryWriter
 from torch.autograd import grad
 
 workers = 8
-device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cpu')
 
 # training parameters
 batch_size = 128
@@ -33,14 +33,10 @@ coco_keypoint_val = COCO(keypoint_path_val)
 # keypoint connections (skeleton) from annotation file
 skeleton = np.array(coco_keypoint.loadCats(coco_keypoint.getCatIds())[0].get('skeleton')) - 1
 
-# get the dataset
-dataset = HeatmapDataset(coco_keypoint, coco_caption)
+# get the
 dataset_val = HeatmapDataset(coco_keypoint_val, coco_caption_val)
 
-dataset_val.dataset=dataset_val.dataset[0:100]
-
 # data loader, containing heatmap information
-data_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=workers)
 
 # data to validate
 data_val = enumerate(torch.utils.data.DataLoader(dataset_val, batch_size=dataset_val.__len__())).__next__()[1]
@@ -48,17 +44,7 @@ heatmap_real_val = data_val.get('heatmap').to(device)
 
 net_g = Generator().to(device)
 net_d = Discriminator().to(device)
-net_g.apply(weights_init)
-net_d.apply(weights_init)
-optimizer_g = optim.Adam(net_g.parameters(), lr=learning_rate_g, betas=(beta_1, beta_2))
-optimizer_d = optim.Adam(net_d.parameters(), lr=learning_rate_d, betas=(beta_1, beta_2))
 
-# fixed noise to see the progression
-fixed_h = 4
-fixed_w = 6
-fixed_size = fixed_h * fixed_w
-fixed_noise = get_noise_tensor(fixed_size).to(device)
-torch.save(fixed_noise, 'fixed_noise')
 
 # train
 start = datetime.now()
@@ -71,101 +57,11 @@ writer = SummaryWriter(comment='_pose')
 loss_g = torch.tensor(0)
 loss_d = torch.tensor(0)
 
-# number of batches
-batch_number = len(data_loader)
 
 for e in range(epoch):
-    print('learning rate: g ' + str(optimizer_g.param_groups[0].get('lr')) + ' d ' + str(
-        optimizer_d.param_groups[0].get('lr')))
 
-    for i, batch in enumerate(data_loader, 0):
-        # first, optimize discriminator
-        net_d.zero_grad()
-
-        # get heatmaps and noises
-        heatmap_real = batch.get('heatmap')
-        current_batch_size = len(heatmap_real)
-        noise = get_noise_tensor(current_batch_size)
-
-        heatmap_real = heatmap_real.to(device)
-        noise = noise.to(device)
-
-        # discriminate heatmpaps
-        score_right = net_d(heatmap_real)
-
-        # generate heatmaps
-        heatmap_fake = net_g(noise).detach()
-
-        # discriminate heatmpaps
-        score_fake = net_d(heatmap_fake)
-
-        # random sample
-        epsilon = np.random.rand(current_batch_size)
-        heatmap_sample = torch.empty_like(heatmap_real)
-        for j in range(current_batch_size):
-            heatmap_sample[j] = epsilon[j] * heatmap_real[j] + (1 - epsilon[j]) * heatmap_fake[j]
-        heatmap_sample.requires_grad = True
-
-        # calculate gradient penalty
-        score_sample = net_d(heatmap_sample)
-        gradient, = grad(score_sample, heatmap_sample, torch.ones_like(score_sample), create_graph=True)
-        gradient_norm = gradient.pow(2).sum((1, 2, 3)).sqrt()
-
-        # calculate losses and update
-        loss_d = (score_fake - score_right + lamb * ((gradient_norm - 1).pow(2))).mean()
-        loss_d.backward()
-        optimizer_d.step()
-
-        # log
-        writer.add_scalar('loss/d', loss_d, batch_number * e + i)
-
-        # second, optimize generator
-        if iteration == k:
-            net_g.zero_grad()
-            iteration = 0
-
-            # get noises
-            noise = get_noise_tensor(current_batch_size)
-            noise = noise.to(device)
-
-            # generate heatmaps
-            heatmap_fake = net_g(noise)
-
-            # discriminate heatmpaps
-            score_fake = net_d(heatmap_fake)
-
-            # discriminate losses and update
-            loss_g = -score_fake.mean()
-            loss_g.backward()
-            optimizer_g.step()
-
-            # log
-            writer.add_scalar('loss/g', loss_g, batch_number * e + i)
-
-        # print progress
-        print('epoch ' + str(e + 1) + ' of ' + str(epoch) + ' batch ' + str(i + 1) + ' of ' + str(
-            batch_number) + ' g loss: ' + str(loss_g.item()) + ' d loss: ' + str(loss_d.item()))
-
-        iteration = iteration + 1
-
-    # save models
-    torch.save(net_g.state_dict(), generator_path + '_' + f'{e + 1:05d}')
-    torch.save(net_d.state_dict(), discriminator_path + '_' + f'{e + 1:05d}')
-
-    # plot and save generated samples from fixed noise
-    net_g.eval()
-    with torch.no_grad():
-        fixed_fake = net_g(fixed_noise)
-    net_g.train()
-    fixed_fake = np.array(fixed_fake.tolist()) * 0.5 + 0.5
-    f = plt.figure(figsize=(19.2, 12))
-    for sample in range(fixed_size):
-        plt.subplot(fixed_h, fixed_w, sample + 1)
-        plot_heatmap(fixed_fake[sample], skeleton)
-        plt.title(None)
-        plt.xticks([])
-        plt.yticks([])
-    plt.savefig('figures/fixed_noise_samples_' + f'{e + 1:05d}' + '.png')
+    net_g.load_state_dict(torch.load(generator_path + '_' + f'{e+1:05d}'), False)
+    net_d.load_state_dict(torch.load(discriminator_path + '_' + f'{e+1:05d}'), False)
 
     # validate
     net_g.eval()
