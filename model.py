@@ -139,7 +139,7 @@ def get_heatmap(keypoint, augment=True):
 
 
 # plot a heatmap
-def plot_heatmap(heatmap, skeleton=None, image_path=None, caption=None):
+def plot_heatmap(heatmap, skeleton=None, image_path=None, caption=None, only_skeleton=False):
     # locate the keypoints (the maximum of each channel)
     heatmap_max = np.amax(np.amax(heatmap, axis=1), axis=1)
     index_max = np.array([np.unravel_index(np.argmax(h), h.shape) for h in heatmap])
@@ -155,6 +155,14 @@ def plot_heatmap(heatmap, skeleton=None, image_path=None, caption=None):
         x_skeleton = x_keypoint[skeleton]
         y_skeleton = y_keypoint[skeleton]
         skeleton_show = [i for i in range(len(skeleton)) if (heatmap_max[skeleton[i]] > heatmap_threshold).all()]
+
+        # only plot keypoints and skeleton
+        if only_skeleton:
+            plt.imshow(np.zeros((64, 64, 3), 'float32'))
+            [plt.plot(x_skeleton[i], y_skeleton[i], c=skeleton_colors[i], linewidth=2) for i in skeleton_show]
+            [plt.plot(x_keypoint[i], y_keypoint[i], 'o', c=keypoint_colors[i], markersize=4, markeredgecolor='k',
+                      markeredgewidth=1) for i in keypoint_show]
+            return
 
     # get a heatmap in single image with colors
     heatmap_color = np.empty((total_keypoints, heatmap_size, heatmap_size, 3), dtype='float32')
