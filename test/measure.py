@@ -67,8 +67,8 @@ with torch.no_grad():
 
     # plot
     plt.figure()
-    plt.hist(distance_real, 100, alpha=0.5)
-    plt.hist(distance_fake, 100, alpha=0.5)
+    plt.hist(distance_real, np.arange(1,400,4), alpha=0.5)
+    plt.hist(distance_fake, np.arange(1,400,4), alpha=0.5)
     plt.legend(['real', 'fake'])
     plt.title('nearest neighbor distances')
     plt.xlabel('distance')
