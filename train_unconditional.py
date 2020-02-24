@@ -56,7 +56,6 @@ fixed_h = 4
 fixed_w = 6
 fixed_size = fixed_h * fixed_w
 fixed_noise = get_noise_tensor(fixed_size).to(device)
-torch.save(fixed_noise, 'fixed_noise')
 
 # train
 start = datetime.now()

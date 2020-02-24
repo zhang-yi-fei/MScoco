@@ -210,6 +210,8 @@ def plot_heatmap(heatmap, skeleton=None, image_path=None, caption=None, only_ske
             [plt.plot(x_skeleton[i], y_skeleton[i], c=skeleton_colors[i], linewidth=2) for i in skeleton_show]
             [plt.plot(x_keypoint[i], y_keypoint[i], 'o', c=keypoint_colors[i], markersize=4, markeredgecolor='k',
                       markeredgewidth=1) for i in keypoint_show]
+            plt.title('pose')
+            plt.xlabel(caption)
             return
 
     # get a heatmap in single image with colors
@@ -425,8 +427,14 @@ class Discriminator(nn.Module):
 
         )
 
+        self.activation = nn.LeakyReLU(0.2, inplace=True)
+
     def forward(self, input_heatmap):
         return self.third(self.second(self.main(input_heatmap)))
+
+    def feature(self, heatmap):
+        return self.activation(
+            self.second(self.main(heatmap.view(1, total_keypoints, heatmap_size, heatmap_size)))).view(-1)
 
 
 # custom weights initialization called on net_g and net_d
@@ -487,51 +495,39 @@ class Discriminator2(Discriminator):
         return self.third(self.second2(tensor))
 
 
-# get max index of a heatmap
-def heatmap_to_max_index(heatmap):
-    max_index = np.array([np.unravel_index(np.argmax(h), h.shape) for h in heatmap])
-
-    # set the index of heatmap below threshold to [0,0]
-    for i in range(len(heatmap)):
-        if heatmap[i][tuple(max_index[i])] < heatmap_threshold:
-            max_index[i][:] = heatmap_size / 2
-    return max_index
-
-
-# distance between two heatmaps: the sum of the distances between maximum points of all 17 keypoint heatmaps
-def heatmap_distance(heatmap_max_index, heatmap_max_index2):
-    return sum(np.sqrt(np.sum((heatmap_max_index - heatmap_max_index2) ** 2, axis=1)))
+l2 = nn.PairwiseDistance()
 
 
 # find the nearest neighbor distance of a heatmap in a list of heatmaps
-def nearest_neighbor(heatmap_max_index, heatmap_max_index_list):
-    distance = heatmap_distance(heatmap_max_index, heatmap_max_index_list[0])
+def nearest_neighbor(heatmap_feature, heatmap_feature_list):
+    # repeat the heatmap
+    n = len(heatmap_feature_list)
+    heatmap_feature = heatmap_feature.repeat(n, 1)
 
     # find nearest neighbor
-    for heatmap_max_index2 in heatmap_max_index_list[1:]:
-        new_distance = heatmap_distance(heatmap_max_index, heatmap_max_index2)
-        if new_distance < distance:
-            distance = new_distance
+    heatmap_feature_list = torch.stack(heatmap_feature_list)
+    distance = l2(heatmap_feature, heatmap_feature_list).min().item()
+
     return distance
 
 
 # calculate the one-nearest-neighbor accuracy
-def one_nearest_neighbor(heatmap_max_index_list, heatmap_max_index_list2):
-    size = len(heatmap_max_index_list)
+def one_nearest_neighbor(heatmap_feature_list, heatmap_feature_list2):
+    size = len(heatmap_feature_list)
 
     # number of correct classifications
     count = 0
     for i in range(size):
         # a heatmap from the first list
-        if nearest_neighbor(heatmap_max_index_list[i],
-                            heatmap_max_index_list[0:i] + heatmap_max_index_list[i + 1:]) < nearest_neighbor(
-            heatmap_max_index_list[i], heatmap_max_index_list2):
+        if nearest_neighbor(heatmap_feature_list[i],
+                            heatmap_feature_list[0:i] + heatmap_feature_list[i + 1:]) < nearest_neighbor(
+            heatmap_feature_list[i], heatmap_feature_list2):
             count = count + 1
 
         # a heatmap from the second list
-        if nearest_neighbor(heatmap_max_index_list2[i],
-                            heatmap_max_index_list2[0:i] + heatmap_max_index_list2[i + 1:]) < nearest_neighbor(
-            heatmap_max_index_list2[i], heatmap_max_index_list):
+        if nearest_neighbor(heatmap_feature_list2[i],
+                            heatmap_feature_list2[0:i] + heatmap_feature_list2[i + 1:]) < nearest_neighbor(
+            heatmap_feature_list2[i], heatmap_feature_list):
             count = count + 1
 
     # accuracy

@@ -6,6 +6,9 @@ from datetime import datetime
 from torch.utils.tensorboard import SummaryWriter
 from torch.autograd import grad
 
+generator_path = 'models_full/generator'
+discriminator_path = 'models_full/discriminator'
+
 workers = 8
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
@@ -199,7 +202,7 @@ for e in range(epoch):
         plt.xlabel('(fake)')
         plt.xticks([])
         plt.yticks([])
-    plt.savefig('figures/fixed_noise_samples_' + f'{e + 1:05d}' + '.png')
+    plt.savefig('figures_full/fixed_noise_samples_' + f'{e + 1:05d}' + '.png')
     plt.close()
 
     # validate

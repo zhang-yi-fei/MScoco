@@ -78,6 +78,10 @@ fixed_noise = get_noise_tensor(fixed_h).to(device)
 fixed_text = torch.tensor([get_caption_vector(text_model, caption) for caption in fixed_caption], dtype=torch.float32,
                           device=device).unsqueeze(-1).unsqueeze(-1)
 
+# save models before training
+torch.save(net_g.state_dict(), generator_path + '_' + f'{start_from_epoch + 1:05d}' + '_new.png')
+torch.save(net_d.state_dict(), discriminator_path + '_' + f'{start_from_epoch + 1:05d}' + '_new.png')
+
 # plot and save generated samples from fixed noise (before training begins)
 net_g.eval()
 net_d.eval()
@@ -244,43 +248,7 @@ for e in range(start_from_epoch, end_in_epoch):
     net_g.eval()
     net_d.eval()
 
-    # calculate d loss
-    noise_val = get_noise_tensor(dataset_val.__len__()).to(device)
-    text_mismatch_val = dataset_val.get_random_caption_tensor(dataset_val.__len__()).to(device)
-    with torch.no_grad():
-        score_right_val = net_d(heatmap_real_val, text_match_val).detach()
-        score_wrong_val = net_d(heatmap_real_val, text_mismatch_val).detach()
-        heatmap_fake_val = net_g(noise_val, text_match_val).detach()
-        score_fake_val = net_d(heatmap_fake_val, text_match_val).detach()
-    epsilon_val = np.random.rand(dataset_val.__len__())
-    heatmap_sample_val = torch.empty_like(heatmap_real_val)
-    for j in range(dataset_val.__len__()):
-        heatmap_sample_val[j] = epsilon_val[j] * heatmap_real_val[j] + (1 - epsilon_val[j]) * heatmap_fake_val[j]
-    heatmap_sample_val.requires_grad = True
-    text_match_val.requires_grad = True
-    score_sample_val = net_d(heatmap_sample_val, text_match_val)
-    gradient_h_val, gradient_t_val = grad(score_sample_val, [heatmap_sample_val, text_match_val],
-                                          torch.ones_like(score_sample_val), create_graph=True)
-    gradient_norm_val = (gradient_h_val.pow(2).sum((1, 2, 3)) + gradient_t_val.pow(2).sum((1, 2, 3))).sqrt()
-    loss_d_val = (score_fake_val + alpha * score_wrong_val - (1 + alpha) * score_right_val + lamb * (
-        torch.max(torch.tensor(0, dtype=torch.float32, device=device), gradient_norm_val - 1).pow(2))).mean()
 
-    # calculate g loss
-    text_interpolated_val = dataset_val.get_interpolated_caption_tensor(dataset_val.__len__()).to(device)
-    noise_val = get_noise_tensor(dataset_val.__len__()).to(device)
-    noise2_val = get_noise_tensor(dataset_val.__len__()).to(device)
-    with torch.no_grad():
-        heatmap_fake_val = net_g(noise_val, text_match_val).detach()
-        heatmap_interpolated_val = net_g(noise2_val, text_interpolated_val).detach()
-        score_fake_val = net_d(heatmap_fake_val, text_match_val).detach()
-        score_interpolated_val = net_d(heatmap_interpolated_val, text_interpolated_val).detach()
-    loss_g_val = -(score_fake_val + score_interpolated_val).mean()
-
-    # print and log
-    print('epoch ' + str(e + 1) + ' of ' + str(end_in_epoch) + ' val g loss: ' + str(
-        loss_g_val.item()) + ' val d loss: ' + str(loss_d_val.item()))
-    writer.add_scalar('loss_val/g', loss_g_val, e - start_from_epoch)
-    writer.add_scalar('loss_val/d', loss_d_val, e - start_from_epoch)
 
     net_g.train()
     net_d.train()
