@@ -42,7 +42,7 @@ data_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffl
 
 # data to validate
 data_val = enumerate(torch.utils.data.DataLoader(dataset_val, batch_size=dataset_val.__len__())).__next__()[1]
-heatmap_real_val = data_val.get('heatmap').to(device)
+heatmap_real_val = data_val.get('heatmap').to('cpu')
 
 net_g = Generator().to(device)
 net_d = Discriminator().to(device)
@@ -168,8 +168,11 @@ for e in range(epoch):
     net_g.eval()
     net_d.eval()
 
+    net_g.to('cpu')
+    net_d.to('cpu')
+
     # calculate d loss
-    noise_val = get_noise_tensor(dataset_val.__len__()).to(device)
+    noise_val = get_noise_tensor(dataset_val.__len__()).to('cpu')
     with torch.no_grad():
         score_right_val = net_d(heatmap_real_val).detach()
         heatmap_fake_val = net_g(noise_val).detach()
@@ -185,7 +188,7 @@ for e in range(epoch):
     loss_d_val = (score_fake_val - score_right_val + lamb * ((gradient_norm_val - 1).pow(2))).mean()
 
     # calculate g loss
-    noise_val = get_noise_tensor(dataset_val.__len__()).to(device)
+    noise_val = get_noise_tensor(dataset_val.__len__()).to('cpu')
     with torch.no_grad():
         heatmap_fake_val = net_g(noise_val).detach()
         score_fake_val = net_d(heatmap_fake_val).detach()
@@ -200,6 +203,9 @@ for e in range(epoch):
 
     net_g.train()
     net_d.train()
+
+    net_g.to(device)
+    net_d.to(device)
 
 print('\nfinished')
 print(datetime.now())
