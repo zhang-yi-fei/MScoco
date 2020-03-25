@@ -2,6 +2,9 @@ from model import *
 from pycocotools.coco import COCO
 import fasttext
 
+generator_path = 'trained/model_generator'
+discriminator_path = 'trained/model_discriminator'
+
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 # read captions and keypoints from files
@@ -17,13 +20,11 @@ text_model = fasttext.load_model(text_model_path)
 # get single-person image dataset
 dataset = HeatmapDataset(coco_keypoint, coco_caption, True)
 
-epoch = 2000
-
 # load the GAN
 net_g = Generator2()
 net_d = Discriminator2()
-net_g.load_state_dict(torch.load(generator_path + '_' + f'{epoch:05d}'))
-net_d.load_state_dict(torch.load(discriminator_path + '_' + f'{epoch:05d}'))
+net_g.load_state_dict(torch.load(generator_path))
+net_d.load_state_dict(torch.load(discriminator_path))
 net_g.to(device)
 net_d.to(device)
 net_g.eval()

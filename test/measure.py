@@ -2,7 +2,7 @@ from model import *
 from pycocotools.coco import COCO
 import fasttext
 
-generator_path = 'models/trained/model_gp_biglambda_generator'
+generator_path = 'trained/model_generator'
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
