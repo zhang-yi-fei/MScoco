@@ -14,7 +14,8 @@ learning_rate_g = 0.0001
 learning_rate_d = 0.0001
 epoch = 200
 
-# penalty coefficient
+# penalty coefficient (Lipschitz Penalty or Gradient Penalty)
+lp = False
 lamb = 10
 
 # train discriminator k times before training generator
@@ -109,7 +110,11 @@ for e in range(epoch):
         gradient_norm = gradient.pow(2).sum((1, 2, 3)).sqrt()
 
         # calculate losses and update
-        loss_d = (score_fake - score_right + lamb * ((gradient_norm - 1).pow(2))).mean()
+        if lp:
+            loss_d = (score_fake - score_right + lamb * (
+                torch.max(torch.tensor(0, dtype=torch.float32, device=device), gradient_norm - 1).pow(2))).mean()
+        else:
+            loss_d = (score_fake - score_right + lamb * ((gradient_norm - 1).pow(2))).mean()
         loss_d.backward()
         optimizer_d.step()
 
@@ -185,7 +190,11 @@ for e in range(epoch):
     score_sample_val = net_d(heatmap_sample_val)
     gradient_val, = grad(score_sample_val, heatmap_sample_val, torch.ones_like(score_sample_val), create_graph=True)
     gradient_norm_val = gradient_val.pow(2).sum((1, 2, 3)).sqrt()
-    loss_d_val = (score_fake_val - score_right_val + lamb * ((gradient_norm_val - 1).pow(2))).mean()
+    if lp:
+        loss_d_val = (score_fake_val - score_right_val + lamb * (
+            torch.max(torch.tensor(0, dtype=torch.float32, device='cpu'), gradient_norm_val - 1).pow(2))).mean()
+    else:
+        loss_d_val = (score_fake_val - score_right_val + lamb * ((gradient_norm_val - 1).pow(2))).mean()
 
     # calculate g loss
     noise_val = get_noise_tensor(dataset_val.__len__()).to('cpu')

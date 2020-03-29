@@ -9,6 +9,9 @@ from torch.autograd import grad
 workers = 8
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
+# whether multi-person
+multi = False
+
 # training parameters
 batch_size = 128
 learning_rate_g = 0.0004
@@ -16,8 +19,9 @@ learning_rate_d = 0.0004
 start_from_epoch = 200
 end_in_epoch = 1200
 
-# penalty coefficient
-lamb = 150
+# penalty coefficient (Lipschitz Penalty or Gradient Penalty)
+lp = False
+lamb = 20
 
 # level of text-image matching
 alpha = 1
@@ -42,8 +46,9 @@ skeleton = np.array(coco_keypoint.loadCats(coco_keypoint.getCatIds())[0].get('sk
 text_model = fasttext.load_model(text_model_path)
 
 # get the dataset (single person, with captions)
-dataset = HeatmapDataset(coco_keypoint, coco_caption, single_person=True, text_model=text_model)
-dataset_val = HeatmapDataset(coco_keypoint_val, coco_caption_val, single_person=True, text_model=text_model)
+dataset = HeatmapDataset(coco_keypoint, coco_caption, single_person=not multi, text_model=text_model, full_image=multi)
+dataset_val = HeatmapDataset(coco_keypoint_val, coco_caption_val, single_person=not multi, text_model=text_model,
+                             full_image=multi)
 
 # data loader, containing heatmap information
 data_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=workers)
@@ -58,11 +63,12 @@ net_d = Discriminator2().to(device)
 net_g.apply(weights_init)
 net_d.apply(weights_init)
 
-# load first step (without captions) trained weights
-net_g.load_state_dict(torch.load(generator_path + '_' + f'{start_from_epoch:05d}'), False)
-net_d.load_state_dict(torch.load(discriminator_path + '_' + f'{start_from_epoch:05d}'), False)
-net_g.first2.weight.data[0:noise_size] = net_g.first.weight.data
-net_d.second2.weight.data[:, 0:convolution_channel_d[-1], :, :] = net_d.second.weight.data
+# load first step (without captions) trained weights if available
+if start_from_epoch > 0:
+    net_g.load_state_dict(torch.load(generator_path + '_' + f'{start_from_epoch:05d}'), False)
+    net_d.load_state_dict(torch.load(discriminator_path + '_' + f'{start_from_epoch:05d}'), False)
+    net_g.first2.weight.data[0:noise_size] = net_g.first.weight.data
+    net_d.second2.weight.data[:, 0:convolution_channel_d[-1], :, :] = net_d.second.weight.data
 optimizer_g = optim.Adam(net_g.parameters(), lr=learning_rate_g, betas=(beta_1, beta_2))
 optimizer_d = optim.Adam(net_d.parameters(), lr=learning_rate_d, betas=(beta_1, beta_2))
 
@@ -79,8 +85,8 @@ fixed_text = torch.tensor([get_caption_vector(text_model, caption) for caption i
                           device=device).unsqueeze(-1).unsqueeze(-1)
 
 # save models before training
-torch.save(net_g.state_dict(), generator_path + '_' + f'{start_from_epoch + 1:05d}' + '_new.png')
-torch.save(net_d.state_dict(), discriminator_path + '_' + f'{start_from_epoch + 1:05d}' + '_new.png')
+torch.save(net_g.state_dict(), generator_path + '_' + f'{start_from_epoch:05d}' + '_new')
+torch.save(net_d.state_dict(), discriminator_path + '_' + f'{start_from_epoch:05d}' + '_new')
 
 # plot and save generated samples from fixed noise (before training begins)
 net_g.eval()
@@ -95,14 +101,14 @@ fixed_fake = np.array(fixed_fake.tolist()) * 0.5 + 0.5
 f = plt.figure(figsize=(19.2, 12))
 for sample in range(fixed_w):
     plt.subplot(fixed_h + 1, fixed_w, sample + 1)
-    plot_heatmap(fixed_real_array[sample], skeleton)
+    plot_heatmap(fixed_real_array[sample], skeleton=(None if multi else skeleton))
     plt.title(fixed_caption[sample][0:30] + '\n' + fixed_caption[sample][30:])
     plt.xlabel('(real)')
     plt.xticks([])
     plt.yticks([])
 for sample in range(fixed_size):
     plt.subplot(fixed_h + 1, fixed_w, fixed_w + sample + 1)
-    plot_heatmap(fixed_fake[sample], skeleton)
+    plot_heatmap(fixed_fake[sample], skeleton=(None if multi else skeleton))
     plt.title(None)
     plt.xlabel('(fake)')
     plt.xticks([])
@@ -117,7 +123,7 @@ print('training')
 net_g.train()
 net_d.train()
 iteration = 1
-writer = SummaryWriter(comment='_caption')
+writer = SummaryWriter(comment='_caption' + ('_multi' if multi else ''))
 loss_g = torch.tensor(0)
 loss_d = torch.tensor(0)
 
@@ -169,8 +175,12 @@ for e in range(start_from_epoch, end_in_epoch):
         gradient_norm = (gradient_h.pow(2).sum((1, 2, 3)) + gradient_t.pow(2).sum((1, 2, 3))).sqrt()
 
         # calculate losses and update
-        loss_d = (score_fake + alpha * score_wrong - (1 + alpha) * score_right + lamb * (
-            torch.max(torch.tensor(0, dtype=torch.float32, device=device), gradient_norm - 1).pow(2))).mean()
+        if lp:
+            loss_d = (score_fake + alpha * score_wrong - (1 + alpha) * score_right + lamb * (
+                torch.max(torch.tensor(0, dtype=torch.float32, device=device), gradient_norm - 1).pow(2))).mean()
+        else:
+            loss_d = (score_fake + alpha * score_wrong - (1 + alpha) * score_right + lamb * (
+                (gradient_norm - 1).pow(2))).mean()
         loss_d.backward()
         optimizer_d.step()
 
@@ -229,14 +239,14 @@ for e in range(start_from_epoch, end_in_epoch):
     f = plt.figure(figsize=(19.2, 12))
     for sample in range(fixed_w):
         plt.subplot(fixed_h + 1, fixed_w, sample + 1)
-        plot_heatmap(fixed_real_array[sample], skeleton)
+        plot_heatmap(fixed_real_array[sample], skeleton=(None if multi else skeleton))
         plt.title(fixed_caption[sample][0:30] + '\n' + fixed_caption[sample][30:])
         plt.xlabel('(real)')
         plt.xticks([])
         plt.yticks([])
     for sample in range(fixed_size):
         plt.subplot(fixed_h + 1, fixed_w, fixed_w + sample + 1)
-        plot_heatmap(fixed_fake[sample], skeleton)
+        plot_heatmap(fixed_fake[sample], skeleton=(None if multi else skeleton))
         plt.title(None)
         plt.xlabel('(fake)')
         plt.xticks([])
@@ -266,8 +276,12 @@ for e in range(start_from_epoch, end_in_epoch):
     gradient_h_val, gradient_t_val = grad(score_sample_val, [heatmap_sample_val, text_match_val],
                                           torch.ones_like(score_sample_val), create_graph=True)
     gradient_norm_val = (gradient_h_val.pow(2).sum((1, 2, 3)) + gradient_t_val.pow(2).sum((1, 2, 3))).sqrt()
-    loss_d_val = (score_fake_val + alpha * score_wrong_val - (1 + alpha) * score_right_val + lamb * (
-        torch.max(torch.tensor(0, dtype=torch.float32, device=device), gradient_norm_val - 1).pow(2))).mean()
+    if lp:
+        loss_d_val = (score_fake_val + alpha * score_wrong_val - (1 + alpha) * score_right_val + lamb * (
+            torch.max(torch.tensor(0, dtype=torch.float32, device=device), gradient_norm_val - 1).pow(2))).mean()
+    else:
+        loss_d_val = (score_fake_val + alpha * score_wrong_val - (1 + alpha) * score_right_val + lamb * (
+            (gradient_norm_val - 1).pow(2))).mean()
 
     # calculate g loss
     text_interpolated_val = dataset_val.get_interpolated_caption_tensor(dataset_val.__len__()).to(device)
