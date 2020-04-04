@@ -2,7 +2,7 @@ from model import *
 from pycocotools.coco import COCO
 import fasttext
 
-generator_path = 'trained/model_multi_generator'
+generator_path = 'trained/model_generator'
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
@@ -35,7 +35,7 @@ with torch.no_grad():
     average_distance_10 = []
     nn_vector_distance_10 = []
 
-    # two list of heatmaps: one real, one fake
+    # list of real heatmaps
     for data in dataset.dataset:
         real_max_index.append(heatmap_to_max_index(dataset.get_heatmap(data, False)))
         caption = random.choice(data.get('caption')).get('caption')
