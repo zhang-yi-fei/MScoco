@@ -14,8 +14,17 @@ learning_rate_g = 0.0001
 learning_rate_d = 0.0001
 epoch = 200
 
+# algorithms: gan, wgan, wgan-gp, wgan-lp
+# gan: k = 1, beta_1 = 0.5, beta_2 = 0.999, lr = 0.0005, epoch = 50
+# wgan: k = 5, beta_1 = 0, beta_2 = 0.9, lr = 0.0001, c = 0.01, epoch = 200
+# wgan-gp: k = 5, beta_1 = 0, beta_2 = 0.9, lr = 0.0001, lamb = 10, epoch = 200
+# wgan-lp: k = 5, beta_1 = 0, beta_2 = 0.9, lr = 0.0001, lamb = 10, epoch = 200
+algorithm = 'wgan-lp'
+
+# weight clipping (WGAN)
+c = 0.01
+
 # penalty coefficient (Lipschitz Penalty or Gradient Penalty)
-lp = False
 lamb = 10
 
 # train discriminator k times before training generator
@@ -44,13 +53,20 @@ data_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffl
 # data to validate
 data_val = enumerate(torch.utils.data.DataLoader(dataset_val, batch_size=dataset_val.__len__())).__next__()[1]
 heatmap_real_val = data_val.get('heatmap').to('cpu')
+label_val = torch.full((len(dataset_val),), 1, dtype=torch.float32, device='cpu')
 
 net_g = Generator().to(device)
-net_d = Discriminator().to(device)
+if algorithm == 'gan':
+    net_d = Discriminator(bn=True, sigmoid=True).to(device)
+elif algorithm == 'wgan':
+    net_d = Discriminator(bn=True).to(device)
+else:
+    net_d = Discriminator().to(device)
 net_g.apply(weights_init)
 net_d.apply(weights_init)
 optimizer_g = optim.Adam(net_g.parameters(), lr=learning_rate_g, betas=(beta_1, beta_2))
 optimizer_d = optim.Adam(net_d.parameters(), lr=learning_rate_d, betas=(beta_1, beta_2))
+criterion = nn.BCELoss()
 
 # fixed noise to see the progression
 fixed_h = 4
@@ -65,7 +81,7 @@ print('training')
 net_g.train()
 net_d.train()
 iteration = 1
-writer = SummaryWriter(comment='_pose')
+writer = SummaryWriter(comment='_pose_' + algorithm)
 loss_g = torch.tensor(0)
 loss_d = torch.tensor(0)
 
@@ -97,26 +113,50 @@ for e in range(epoch):
         # discriminate heatmpaps
         score_fake = net_d(heatmap_fake)
 
-        # random sample
-        epsilon = np.random.rand(current_batch_size)
-        heatmap_sample = torch.empty_like(heatmap_real)
-        for j in range(current_batch_size):
-            heatmap_sample[j] = epsilon[j] * heatmap_real[j] + (1 - epsilon[j]) * heatmap_fake[j]
-        heatmap_sample.requires_grad = True
+        if algorithm == 'gan':
+            label = torch.full((current_batch_size,), 1, dtype=torch.float32, device=device)
+            loss_right = criterion(score_right.view(-1), label)
+            loss_right.backward()
 
-        # calculate gradient penalty
-        score_sample = net_d(heatmap_sample)
-        gradient, = grad(score_sample, heatmap_sample, torch.ones_like(score_sample), create_graph=True)
-        gradient_norm = gradient.pow(2).sum((1, 2, 3)).sqrt()
+            label.fill_(0)
+            loss_fake = criterion(score_fake.view(-1), label)
+            loss_fake.backward()
 
-        # calculate losses and update
-        if lp:
-            loss_d = (score_fake - score_right + lamb * (
-                torch.max(torch.tensor(0, dtype=torch.float32, device=device), gradient_norm - 1).pow(2))).mean()
+            # calculate losses and update
+            loss_d = loss_right + loss_fake
+            optimizer_d.step()
+        elif algorithm == 'wgan':
+            # calculate losses and update
+            loss_d = (score_fake - score_right).mean()
+            loss_d.backward()
+            optimizer_d.step()
+
+            # clipping
+            for p in net_d.parameters():
+                p.data.clamp_(-c, c)
         else:
-            loss_d = (score_fake - score_right + lamb * ((gradient_norm - 1).pow(2))).mean()
-        loss_d.backward()
-        optimizer_d.step()
+            # 'wgan-gp' and 'wgan-lp'
+            # random sample
+            epsilon = np.random.rand(current_batch_size)
+            heatmap_sample = torch.empty_like(heatmap_real)
+            for j in range(current_batch_size):
+                heatmap_sample[j] = epsilon[j] * heatmap_real[j] + (1 - epsilon[j]) * heatmap_fake[j]
+            heatmap_sample.requires_grad = True
+
+            # calculate gradient penalty
+            score_sample = net_d(heatmap_sample)
+            gradient, = grad(score_sample, heatmap_sample, torch.ones_like(score_sample), create_graph=True)
+            gradient_norm = gradient.pow(2).sum((1, 2, 3)).sqrt()
+
+            # calculate losses and update
+            if algorithm == 'wgan-gp':
+                loss_d = (score_fake - score_right + lamb * ((gradient_norm - 1).pow(2))).mean()
+            else:
+                # 'wgan-lp'
+                loss_d = (score_fake - score_right + lamb * (
+                    torch.max(torch.tensor(0, dtype=torch.float32, device=device), gradient_norm - 1).pow(2))).mean()
+            loss_d.backward()
+            optimizer_d.step()
 
         # log
         writer.add_scalar('loss/d', loss_d, batch_number * e + i)
@@ -136,10 +176,19 @@ for e in range(epoch):
             # discriminate heatmpaps
             score_fake = net_d(heatmap_fake)
 
-            # discriminate losses and update
-            loss_g = -score_fake.mean()
-            loss_g.backward()
-            optimizer_g.step()
+            if algorithm == 'gan':
+                label = torch.full((current_batch_size,), 1, dtype=torch.float32, device=device)
+                loss_g = criterion(score_fake.view(-1), label)
+
+                # calculate losses and update
+                loss_g.backward()
+                optimizer_g.step()
+            else:
+                # 'wgan', 'wgan-gp' and 'wgan-lp'
+                # calculate losses and update
+                loss_g = -score_fake.mean()
+                loss_g.backward()
+                optimizer_g.step()
 
             # log
             writer.add_scalar('loss/g', loss_g, batch_number * e + i)
@@ -182,26 +231,42 @@ for e in range(epoch):
         score_right_val = net_d(heatmap_real_val).detach()
         heatmap_fake_val = net_g(noise_val).detach()
         score_fake_val = net_d(heatmap_fake_val).detach()
-    epsilon_val = np.random.rand(dataset_val.__len__())
-    heatmap_sample_val = torch.empty_like(heatmap_real_val)
-    for j in range(dataset_val.__len__()):
-        heatmap_sample_val[j] = epsilon_val[j] * heatmap_real_val[j] + (1 - epsilon_val[j]) * heatmap_fake_val[j]
-    heatmap_sample_val.requires_grad = True
-    score_sample_val = net_d(heatmap_sample_val)
-    gradient_val, = grad(score_sample_val, heatmap_sample_val, torch.ones_like(score_sample_val), create_graph=True)
-    gradient_norm_val = gradient_val.pow(2).sum((1, 2, 3)).sqrt()
-    if lp:
-        loss_d_val = (score_fake_val - score_right_val + lamb * (
-            torch.max(torch.tensor(0, dtype=torch.float32, device='cpu'), gradient_norm_val - 1).pow(2))).mean()
+    if algorithm == 'gan':
+        label_val.fill_(1)
+        loss_right_val = criterion(score_right_val.view(-1), label_val)
+        label_val.fill_(0)
+        loss_fake_val = criterion(score_fake_val.view(-1), label_val)
+        loss_d_val = loss_right_val + loss_fake_val
+    elif algorithm == 'wgan':
+        loss_d_val = (score_fake_val - score_right_val).mean()
     else:
-        loss_d_val = (score_fake_val - score_right_val + lamb * ((gradient_norm_val - 1).pow(2))).mean()
+        # 'wgan-gp' and 'wgan-lp'
+        epsilon_val = np.random.rand(dataset_val.__len__())
+        heatmap_sample_val = torch.empty_like(heatmap_real_val)
+        for j in range(dataset_val.__len__()):
+            heatmap_sample_val[j] = epsilon_val[j] * heatmap_real_val[j] + (1 - epsilon_val[j]) * heatmap_fake_val[j]
+        heatmap_sample_val.requires_grad = True
+        score_sample_val = net_d(heatmap_sample_val)
+        gradient_val, = grad(score_sample_val, heatmap_sample_val, torch.ones_like(score_sample_val), create_graph=True)
+        gradient_norm_val = gradient_val.pow(2).sum((1, 2, 3)).sqrt()
+        if algorithm == 'wgan-gp':
+            loss_d_val = (score_fake_val - score_right_val + lamb * ((gradient_norm_val - 1).pow(2))).mean()
+        else:
+            # 'wgan-lp
+            loss_d_val = (score_fake_val - score_right_val + lamb * (
+                torch.max(torch.tensor(0, dtype=torch.float32, device='cpu'), gradient_norm_val - 1).pow(2))).mean()
 
     # calculate g loss
     noise_val = get_noise_tensor(dataset_val.__len__()).to('cpu')
     with torch.no_grad():
         heatmap_fake_val = net_g(noise_val).detach()
         score_fake_val = net_d(heatmap_fake_val).detach()
-    loss_g_val = -score_fake_val.mean()
+    if algorithm == 'gan':
+        label_val.fill_(1)
+        loss_g_val = criterion(score_fake_val.view(-1), label_val)
+    else:
+        # 'wgan', 'wgan-gp' and 'wgan-lp'
+        loss_g_val = -score_fake_val.mean()
 
     # print and log
     print(

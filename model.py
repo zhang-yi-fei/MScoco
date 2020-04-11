@@ -40,6 +40,9 @@ left_right_swap = [0, 2, 1, 4, 3, 6, 5, 8, 7, 10, 9, 12, 11, 14, 13, 16, 15]
 # size of text encoding
 sentence_vector_size = 300
 
+# weight of text encoding
+encoding_weight = 30
+
 # size of compressed text encoding
 compress_size = 128
 
@@ -249,7 +252,7 @@ def plot_heatmap(heatmap, skeleton=None, image_path=None, caption=None, only_ske
 
 # return the caption encoding
 def get_caption_vector(text_model, caption):
-    return text_model.get_sentence_vector(caption.replace('\n', '').lower()) * 30
+    return text_model.get_sentence_vector(caption.replace('\n', '').lower()) * encoding_weight
 
 
 # get a batch of noise vectors
@@ -402,28 +405,34 @@ class Generator(nn.Module):
 
 # discriminator given heatmap
 class Discriminator(nn.Module):
-    def __init__(self):
+    def __init__(self, bn=False, sigmoid=False):
         super(Discriminator, self).__init__()
 
         # several layers of convolution and leaky ReLu
         self.main = nn.Sequential(
             nn.Conv2d(total_keypoints, convolution_channel_d[0], 4, 2, 1, bias=False),
+            nn.BatchNorm2d(convolution_channel_d[0]) if bn else nn.Identity(),
             nn.LeakyReLU(0.2, inplace=True),
 
             nn.Conv2d(convolution_channel_d[0], convolution_channel_d[1], 4, 2, 1, bias=False),
+            nn.BatchNorm2d(convolution_channel_d[1]) if bn else nn.Identity(),
             nn.LeakyReLU(0.2, inplace=True),
 
             nn.Conv2d(convolution_channel_d[1], convolution_channel_d[2], 4, 2, 1, bias=False),
+            nn.BatchNorm2d(convolution_channel_d[2]) if bn else nn.Identity(),
             nn.LeakyReLU(0.2, inplace=True),
 
             nn.Conv2d(convolution_channel_d[2], convolution_channel_d[3], 4, 2, 1, bias=False),
+            nn.BatchNorm2d(convolution_channel_d[3]) if bn else nn.Identity(),
             nn.LeakyReLU(0.2, inplace=True)
 
         )
         self.second = nn.Conv2d(convolution_channel_d[-1], d_final_size, 1, bias=False)
         self.third = nn.Sequential(
+            nn.BatchNorm2d(d_final_size) if bn else nn.Identity(),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(d_final_size, 1, 4, 1, 0, bias=False)
+            nn.Conv2d(d_final_size, 1, 4, 1, 0, bias=False),
+            nn.Sigmoid() if sigmoid else nn.Identity()
 
         )
 
@@ -467,8 +476,8 @@ class Generator2(Generator):
 
 # discriminator given heatmap and sentence vector
 class Discriminator2(Discriminator):
-    def __init__(self):
-        super(Discriminator2, self).__init__()
+    def __init__(self, bn=False, sigmoid=False):
+        super(Discriminator2, self).__init__(bn, sigmoid)
 
         # convolution with concatenated sentence vector
         self.second2 = nn.Conv2d(convolution_channel_d[-1] + compress_size, d_final_size, 1, bias=False)
@@ -561,15 +570,11 @@ def one_nearest_neighbor(heatmap_max_index_list, heatmap_max_index_list2):
     count = 0
     for i in range(size):
         # a heatmap from the first list
-        if nearest_neighbor(heatmap_max_index_list[i],
-                            heatmap_max_index_list[0:i] + heatmap_max_index_list[i + 1:]) < nearest_neighbor(
-            heatmap_max_index_list[i], heatmap_max_index_list2):
+        if nearest_neighbor(heatmap_max_index_list[i], heatmap_max_index_list[0:i] + heatmap_max_index_list[i + 1:]) < nearest_neighbor(heatmap_max_index_list[i], heatmap_max_index_list2):
             count = count + 1
 
         # a heatmap from the second list
-        if nearest_neighbor(heatmap_max_index_list2[i],
-                            heatmap_max_index_list2[0:i] + heatmap_max_index_list2[i + 1:]) < nearest_neighbor(
-            heatmap_max_index_list2[i], heatmap_max_index_list):
+        if nearest_neighbor(heatmap_max_index_list2[i], heatmap_max_index_list2[0:i] + heatmap_max_index_list2[i + 1:]) < nearest_neighbor(heatmap_max_index_list2[i], heatmap_max_index_list):
             count = count + 1
 
     # accuracy

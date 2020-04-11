@@ -19,9 +19,18 @@ learning_rate_d = 0.0004
 start_from_epoch = 200
 end_in_epoch = 1200
 
+# algorithms: gan, wgan, wgan-gp, wgan-lp
+# gan: k = 1, beta_1 = 0.5, beta_2 = 0.999, lr = 0.0001, epoch = 50~300
+# wgan: k = 5, beta_1 = 0, beta_2 = 0.9, lr = 0.001, c = 0.01, epoch = 200~1200
+# wgan-gp: k = 5, beta_1 = 0, beta_2 = 0.9, lr = 0.0004, lamb = 20, epoch = 200~1200
+# wgan-lp: k = 5, beta_1 = 0, beta_2 = 0.9, lr = 0.0004, lamb = 150, epoch = 200~1200
+algorithm = 'wgan-lp'
+
+# weight clipping (WGAN)
+c = 0.01
+
 # penalty coefficient (Lipschitz Penalty or Gradient Penalty)
-lp = False
-lamb = 20
+lamb = 150
 
 # level of text-image matching
 alpha = 1
@@ -57,9 +66,15 @@ data_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffl
 data_val = enumerate(torch.utils.data.DataLoader(dataset_val, batch_size=dataset_val.__len__())).__next__()[1]
 text_match_val = data_val.get('vector').to(device)
 heatmap_real_val = data_val.get('heatmap').to(device)
+label_val = torch.full((len(dataset_val),), 1, dtype=torch.float32, device=device)
 
 net_g = Generator2().to(device)
-net_d = Discriminator2().to(device)
+if algorithm == 'gan':
+    net_d = Discriminator2(bn=True, sigmoid=True).to(device)
+elif algorithm == 'wgan':
+    net_d = Discriminator2(bn=True).to(device)
+else:
+    net_d = Discriminator2().to(device)
 net_g.apply(weights_init)
 net_d.apply(weights_init)
 
@@ -71,6 +86,7 @@ if start_from_epoch > 0:
     net_d.second2.weight.data[:, 0:convolution_channel_d[-1], :, :] = net_d.second.weight.data
 optimizer_g = optim.Adam(net_g.parameters(), lr=learning_rate_g, betas=(beta_1, beta_2))
 optimizer_d = optim.Adam(net_d.parameters(), lr=learning_rate_d, betas=(beta_1, beta_2))
+criterion = nn.BCELoss()
 
 # fixed training data (from validation set), noise and sentence vectors to see the progression
 fixed_h = 6
@@ -90,13 +106,9 @@ torch.save(net_d.state_dict(), discriminator_path + '_' + f'{start_from_epoch:05
 
 # plot and save generated samples from fixed noise (before training begins)
 net_g.eval()
-net_d.eval()
 with torch.no_grad():
     fixed_fake = net_g(fixed_noise.repeat_interleave(fixed_w, dim=0), fixed_text.repeat(fixed_h, 1, 1, 1))
-    fixed_score_fake = net_d(fixed_fake, fixed_text.repeat(fixed_h, 1, 1, 1))
-    fixed_score_real = net_d(fixed_real, fixed_text)
 net_g.train()
-net_d.train()
 fixed_fake = np.array(fixed_fake.tolist()) * 0.5 + 0.5
 f = plt.figure(figsize=(19.2, 12))
 for sample in range(fixed_w):
@@ -123,7 +135,7 @@ print('training')
 net_g.train()
 net_d.train()
 iteration = 1
-writer = SummaryWriter(comment='_caption' + ('_multi' if multi else ''))
+writer = SummaryWriter(comment='_caption_' + ('multi_' if multi else '') + algorithm)
 loss_g = torch.tensor(0)
 loss_d = torch.tensor(0)
 
@@ -160,29 +172,58 @@ for e in range(start_from_epoch, end_in_epoch):
         # discriminate heatmpap-text pairs
         score_fake = net_d(heatmap_fake, text_match)
 
-        # random sample
-        epsilon = np.random.rand(current_batch_size)
-        heatmap_sample = torch.empty_like(heatmap_real)
-        for j in range(current_batch_size):
-            heatmap_sample[j] = epsilon[j] * heatmap_real[j] + (1 - epsilon[j]) * heatmap_fake[j]
-        heatmap_sample.requires_grad = True
-        text_match.requires_grad = True
+        if algorithm == 'gan':
+            label = torch.full((current_batch_size,), 1, dtype=torch.float32, device=device)
+            loss_right = criterion(score_right.view(-1), label) * (1 + alpha)
+            loss_right.backward()
 
-        # calculate gradient penalty
-        score_sample = net_d(heatmap_sample, text_match)
-        gradient_h, gradient_t = grad(score_sample, [heatmap_sample, text_match], torch.ones_like(score_sample),
-                                      create_graph=True)
-        gradient_norm = (gradient_h.pow(2).sum((1, 2, 3)) + gradient_t.pow(2).sum((1, 2, 3))).sqrt()
+            label.fill_(0)
+            loss_fake = criterion(score_fake.view(-1), label)
+            loss_fake.backward()
 
-        # calculate losses and update
-        if lp:
-            loss_d = (score_fake + alpha * score_wrong - (1 + alpha) * score_right + lamb * (
-                torch.max(torch.tensor(0, dtype=torch.float32, device=device), gradient_norm - 1).pow(2))).mean()
+            label.fill_(0)
+            loss_wrong = criterion(score_wrong.view(-1), label) * alpha
+            loss_wrong.backward()
+
+            # calculate losses and update
+            loss_d = loss_right + loss_fake + loss_wrong
+            optimizer_d.step()
+        elif algorithm == 'wgan':
+            # calculate losses and update
+            loss_d = (score_fake + alpha * score_wrong - (1 + alpha) * score_right).mean()
+            loss_d.backward()
+            optimizer_d.step()
+
+            # clipping
+            for p in net_d.parameters():
+                p.data.clamp_(-c, c)
         else:
-            loss_d = (score_fake + alpha * score_wrong - (1 + alpha) * score_right + lamb * (
-                (gradient_norm - 1).pow(2))).mean()
-        loss_d.backward()
-        optimizer_d.step()
+            # 'wgan-gp' and 'wgan-lp'
+            # random sample
+            epsilon = np.random.rand(current_batch_size)
+            heatmap_sample = torch.empty_like(heatmap_real)
+            for j in range(current_batch_size):
+                heatmap_sample[j] = epsilon[j] * heatmap_real[j] + (1 - epsilon[j]) * heatmap_fake[j]
+            heatmap_sample.requires_grad = True
+            text_match.requires_grad = True
+
+            # calculate gradient penalty
+            score_sample = net_d(heatmap_sample, text_match)
+            gradient_h, gradient_t = grad(score_sample, [heatmap_sample, text_match], torch.ones_like(score_sample),
+                                          create_graph=True)
+            gradient_norm = (gradient_h.pow(2).sum((1, 2, 3)) + gradient_t.pow(2).sum((1, 2, 3))).sqrt()
+
+            # calculate losses and update
+            if algorithm == 'wgan-gp':
+                loss_d = (score_fake + alpha * score_wrong - (1 + alpha) * score_right + lamb * (
+                    (gradient_norm - 1).pow(2))).mean()
+            else:
+                # 'wgan-lp'
+                loss_d = (score_fake + alpha * score_wrong - (1 + alpha) * score_right + lamb * (
+                    torch.max(torch.tensor(0, dtype=torch.float32, device=device), gradient_norm - 1).pow(2))).mean()
+
+            loss_d.backward()
+            optimizer_d.step()
 
         # log
         writer.add_scalar('loss/d', loss_d, batch_number * (e - start_from_epoch) + i)
@@ -208,10 +249,19 @@ for e in range(start_from_epoch, end_in_epoch):
             score_fake = net_d(heatmap_fake, text_match)
             score_interpolated = net_d(heatmap_interpolated, text_interpolated)
 
-            # discriminate losses and update
-            loss_g = -(score_fake + score_interpolated).mean()
-            loss_g.backward()
-            optimizer_g.step()
+            if algorithm == 'gan':
+                label = torch.full((current_batch_size,), 1, dtype=torch.float32, device=device)
+                loss_g = criterion(score_fake.view(-1), label) + criterion(score_interpolated.view(-1), label)
+
+                # calculate losses and update
+                loss_g.backward()
+                optimizer_g.step()
+            else:
+                # 'wgan', 'wgan-gp' and 'wgan-lp'
+                # calculate losses and update
+                loss_g = -(score_fake + score_interpolated).mean()
+                loss_g.backward()
+                optimizer_g.step()
 
             # log
             writer.add_scalar('loss/g', loss_g, batch_number * (e - start_from_epoch) + i)
@@ -228,13 +278,9 @@ for e in range(start_from_epoch, end_in_epoch):
 
     # plot and save generated samples from fixed noise
     net_g.eval()
-    net_d.eval()
     with torch.no_grad():
         fixed_fake = net_g(fixed_noise.repeat_interleave(fixed_w, dim=0), fixed_text.repeat(fixed_h, 1, 1, 1))
-        fixed_score_fake = net_d(fixed_fake, fixed_text.repeat(fixed_h, 1, 1, 1))
-        fixed_score_real = net_d(fixed_real, fixed_text)
     net_g.train()
-    net_d.train()
     fixed_fake = np.array(fixed_fake.tolist()) * 0.5 + 0.5
     f = plt.figure(figsize=(19.2, 12))
     for sample in range(fixed_w):
@@ -266,22 +312,36 @@ for e in range(start_from_epoch, end_in_epoch):
         score_wrong_val = net_d(heatmap_real_val, text_mismatch_val).detach()
         heatmap_fake_val = net_g(noise_val, text_match_val).detach()
         score_fake_val = net_d(heatmap_fake_val, text_match_val).detach()
-    epsilon_val = np.random.rand(dataset_val.__len__())
-    heatmap_sample_val = torch.empty_like(heatmap_real_val)
-    for j in range(dataset_val.__len__()):
-        heatmap_sample_val[j] = epsilon_val[j] * heatmap_real_val[j] + (1 - epsilon_val[j]) * heatmap_fake_val[j]
-    heatmap_sample_val.requires_grad = True
-    text_match_val.requires_grad = True
-    score_sample_val = net_d(heatmap_sample_val, text_match_val)
-    gradient_h_val, gradient_t_val = grad(score_sample_val, [heatmap_sample_val, text_match_val],
-                                          torch.ones_like(score_sample_val), create_graph=True)
-    gradient_norm_val = (gradient_h_val.pow(2).sum((1, 2, 3)) + gradient_t_val.pow(2).sum((1, 2, 3))).sqrt()
-    if lp:
-        loss_d_val = (score_fake_val + alpha * score_wrong_val - (1 + alpha) * score_right_val + lamb * (
-            torch.max(torch.tensor(0, dtype=torch.float32, device=device), gradient_norm_val - 1).pow(2))).mean()
+    if algorithm == 'gan':
+        label_val.fill_(1)
+        loss_right_val = criterion(score_right_val.view(-1), label_val) * (1 + alpha)
+        label_val.fill_(0)
+        loss_fake_val = criterion(score_fake_val.view(-1), label_val)
+        label_val.fill_(0)
+        loss_wrong_val = criterion(score_wrong_val.view(-1), label_val) * alpha
+        loss_d_val = loss_right_val + loss_fake_val + loss_wrong_val
+    elif algorithm == 'wgan':
+        loss_d_val = (score_fake_val + alpha * score_wrong_val - (1 + alpha) * score_right_val).mean()
     else:
-        loss_d_val = (score_fake_val + alpha * score_wrong_val - (1 + alpha) * score_right_val + lamb * (
-            (gradient_norm_val - 1).pow(2))).mean()
+        # 'wgan-gp' and 'wgan-lp'
+        epsilon_val = np.random.rand(dataset_val.__len__())
+        heatmap_sample_val = torch.empty_like(heatmap_real_val)
+        for j in range(dataset_val.__len__()):
+            heatmap_sample_val[j] = epsilon_val[j] * heatmap_real_val[j] + (1 - epsilon_val[j]) * heatmap_fake_val[j]
+        heatmap_sample_val.requires_grad = True
+        text_match_val.requires_grad = True
+        score_sample_val = net_d(heatmap_sample_val, text_match_val)
+        gradient_h_val, gradient_t_val = grad(score_sample_val, [heatmap_sample_val, text_match_val],
+                                              torch.ones_like(score_sample_val), create_graph=True)
+        gradient_norm_val = (gradient_h_val.pow(2).sum((1, 2, 3)) + gradient_t_val.pow(2).sum((1, 2, 3))).sqrt()
+        if algorithm == 'wgan-gp':
+            loss_d_val = (score_fake_val + alpha * score_wrong_val - (1 + alpha) * score_right_val + lamb * (
+                (gradient_norm_val - 1).pow(2))).mean()
+
+        else:
+            # 'wgan-lp'
+            loss_d_val = (score_fake_val + alpha * score_wrong_val - (1 + alpha) * score_right_val + lamb * (
+                torch.max(torch.tensor(0, dtype=torch.float32, device=device), gradient_norm_val - 1).pow(2))).mean()
 
     # calculate g loss
     text_interpolated_val = dataset_val.get_interpolated_caption_tensor(dataset_val.__len__()).to(device)
@@ -292,7 +352,13 @@ for e in range(start_from_epoch, end_in_epoch):
         heatmap_interpolated_val = net_g(noise2_val, text_interpolated_val).detach()
         score_fake_val = net_d(heatmap_fake_val, text_match_val).detach()
         score_interpolated_val = net_d(heatmap_interpolated_val, text_interpolated_val).detach()
-    loss_g_val = -(score_fake_val + score_interpolated_val).mean()
+    if algorithm == 'gan':
+        label_val.fill_(1)
+        loss_g_val = criterion(score_fake_val.view(-1), label_val) + criterion(score_interpolated_val.view(-1),
+                                                                               label_val)
+    else:
+        # 'wgan', 'wgan-gp' and 'wgan-lp'
+        loss_g_val = -(score_fake_val + score_interpolated_val).mean()
 
     # print and log
     print('epoch ' + str(e + 1) + ' of ' + str(end_in_epoch) + ' val g loss: ' + str(
