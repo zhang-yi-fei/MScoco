@@ -51,7 +51,7 @@ with torch.no_grad():
             interpolated_vector = (1 - a[j]) * first_vector[i] + a[j] * second_vector[i]
             heatmap = np.array(net_g(noise, interpolated_vector).squeeze().tolist()) * 0.5 + 0.5
             plt.subplot(3, 5, i * 5 + j + 1)
-            plot_heatmap(heatmap, skeleton)
+            plot_heatmap(heatmap, skeleton, only_skeleton=True)
             plt.xticks([])
             plt.yticks([])
             if j == 0:
@@ -85,7 +85,7 @@ with torch.no_grad():
             interpolated_noise = (1 - a[j]) * first_noise[i] + a[j] * second_noise[i]
             heatmap = np.array(net_g(interpolated_noise, caption_vector[i]).squeeze().tolist()) * 0.5 + 0.5
             plt.subplot(3, 5, i * 5 + j + 1)
-            plot_heatmap(heatmap, skeleton)
+            plot_heatmap(heatmap, skeleton, only_skeleton=True)
             plt.xticks([])
             plt.yticks([])
             if j == 2:

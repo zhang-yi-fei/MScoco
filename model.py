@@ -20,6 +20,7 @@ text_model_path = '/media/data/yzhang2/wiki.en/wiki.en.bin'
 total_keypoints = 17
 keypoint_colors = ['#057020', '#11bb3b', '#12ca3e', '#11bb3b', '#12ca3e', '#1058d1', '#2e73e5', '#cabe12', '#eae053',
                    '#cabe12', '#eae053', '#1058d1', '#2e73e5', '#9dc15c', '#b1cd7e', '#9dc15c', '#b1cd7e']
+keypoint_colors_reverse = [hex(0xffffff - int(c.replace('#', '0x'), 16)).replace('0x', '#') for c in keypoint_colors]
 skeleton_colors = ['#b0070a', '#b0070a', '#f40b0f', '#f40b0f', '#ec7f18', '#ad590b', '#ef9643', '#ec7f18', '#952fe9',
                    '#b467f4', '#952fe9', '#b467f4', '#ee6da5', '#ee6da5', '#ee6da5', '#c8286e', '#e47ca9', '#c8286e',
                    '#e47ca9']
@@ -203,15 +204,16 @@ def plot_heatmap(heatmap, skeleton=None, image_path=None, caption=None, only_ske
     y_skeleton = []
     skeleton_show = []
     if skeleton is not None:
+        skeleton = skeleton[0:17]
         x_skeleton = x_keypoint[skeleton]
         y_skeleton = y_keypoint[skeleton]
         skeleton_show = [i for i in range(len(skeleton)) if (heatmap_max[skeleton[i]] > heatmap_threshold).all()]
 
         # only plot keypoints and skeleton
         if only_skeleton:
-            plt.imshow(np.zeros((64, 64, 3), 'float32'))
-            [plt.plot(x_skeleton[i], y_skeleton[i], c=skeleton_colors[i], linewidth=2) for i in skeleton_show]
-            [plt.plot(x_keypoint[i], y_keypoint[i], 'o', c=keypoint_colors[i], markersize=4, markeredgecolor='k',
+            plt.imshow(np.ones((64, 64, 3), 'float32'))
+            [plt.plot(x_skeleton[i], y_skeleton[i], c=skeleton_colors[i], linewidth=5) for i in skeleton_show]
+            [plt.plot(x_keypoint[i], y_keypoint[i], 'o', c=keypoint_colors[i], markersize=10, markeredgecolor='k',
                       markeredgewidth=1) for i in keypoint_show]
             plt.title('pose')
             plt.xlabel(caption)
@@ -220,11 +222,11 @@ def plot_heatmap(heatmap, skeleton=None, image_path=None, caption=None, only_ske
     # get a heatmap in single image with colors
     heatmap_color = np.empty((total_keypoints, heatmap_size, heatmap_size, 3), dtype='float32')
     for i in range(total_keypoints):
-        heatmap_color[i] = np.tile(np.array(matplotlib.colors.to_rgb(keypoint_colors[i])),
+        heatmap_color[i] = np.tile(np.array(matplotlib.colors.to_rgb(keypoint_colors_reverse[i])),
                                    (heatmap_size, heatmap_size, 1))
         for j in range(3):
             heatmap_color[i, :, :, j] = heatmap_color[i, :, :, j] * heatmap[i]
-    heatmap_color = np.amax(heatmap_color, axis=0)
+    heatmap_color = 1 - np.amax(heatmap_color, axis=0)
 
     # plot the heatmap in black-white and the optional training image
     if image_path is not None:
@@ -232,8 +234,8 @@ def plot_heatmap(heatmap, skeleton=None, image_path=None, caption=None, only_ske
         plt.subplot(1, 2, 1)
         plt.imshow(heatmap_color)
         if skeleton is not None:
-            [plt.plot(x_skeleton[i], y_skeleton[i], c=skeleton_colors[i], linewidth=2) for i in skeleton_show]
-            [plt.plot(x_keypoint[i], y_keypoint[i], 'o', c=keypoint_colors[i], markersize=4, markeredgecolor='k',
+            [plt.plot(x_skeleton[i], y_skeleton[i], c=skeleton_colors[i], linewidth=5) for i in skeleton_show]
+            [plt.plot(x_keypoint[i], y_keypoint[i], 'o', c=keypoint_colors[i], markersize=10, markeredgecolor='k',
                       markeredgewidth=1) for i in keypoint_show]
         plt.title('stacked heatmaps' + (' and skeleton' if skeleton is not None else ''))
         plt.xlabel(caption)
@@ -243,8 +245,8 @@ def plot_heatmap(heatmap, skeleton=None, image_path=None, caption=None, only_ske
     else:
         plt.imshow(heatmap_color)
         if skeleton is not None:
-            [plt.plot(x_skeleton[i], y_skeleton[i], c=skeleton_colors[i], linewidth=2) for i in skeleton_show]
-            [plt.plot(x_keypoint[i], y_keypoint[i], 'o', c=keypoint_colors[i], markersize=4, markeredgecolor='k',
+            [plt.plot(x_skeleton[i], y_skeleton[i], c=skeleton_colors[i], linewidth=5) for i in skeleton_show]
+            [plt.plot(x_keypoint[i], y_keypoint[i], 'o', c=keypoint_colors[i], markersize=10, markeredgecolor='k',
                       markeredgewidth=1) for i in keypoint_show]
         plt.title('stacked heatmaps' + (' and skeleton' if skeleton is not None else ''))
         plt.xlabel(caption)
