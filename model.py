@@ -564,6 +564,20 @@ def mean_vector_distance(vector, vector_list):
     return np.mean(distance)
 
 
+# find the nearest neighbor of a vector in a list of vectors
+def vector_nearest_neighbor_index(vector, vector_list):
+    distance = np.sqrt(np.sum((vector - vector_list[0]) ** 2))
+    index = 0
+
+    # find nearest neighbor
+    for i in range(len(vector_list)):
+        new_distance = np.sqrt(np.sum((vector - vector_list[i]) ** 2))
+        if new_distance < distance:
+            distance = new_distance
+            index = i
+    return index
+
+
 # calculate the one-nearest-neighbor accuracy
 def one_nearest_neighbor(heatmap_max_index_list, heatmap_max_index_list2):
     size = len(heatmap_max_index_list)
