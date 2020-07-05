@@ -24,13 +24,13 @@ end_in_epoch = 1200
 # wgan: k = 5, beta_1 = 0, beta_2 = 0.9, lr = 0.001, c = 0.01, epoch = 200~1200
 # wgan-gp: k = 5, beta_1 = 0, beta_2 = 0.9, lr = 0.0004, lamb = 20, epoch = 200~1200
 # wgan-lp: k = 5, beta_1 = 0, beta_2 = 0.9, lr = 0.0004, lamb = 150, epoch = 200~1200
-algorithm = 'wgan-lp'
+algorithm = 'wgan-gp'
 
 # weight clipping (WGAN)
 c = 0.01
 
 # penalty coefficient (Lipschitz Penalty or Gradient Penalty)
-lamb = 150
+lamb = 10
 
 # level of text-image matching
 alpha = 1

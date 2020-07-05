@@ -10,6 +10,8 @@ from math import sin, cos, pi
 
 generator_path = 'models/generator'
 discriminator_path = 'models/discriminator'
+regression_xy_path = 'models/regression_xy'
+regression_v_path = 'models/regression_v'
 image_folder = '/media/data/yzhang2/coco/train/coco/images/'
 caption_path = '/media/data/yzhang2/coco/train/coco/annotations/captions_train2017.json'
 keypoint_path = '/media/data/yzhang2/coco/train/coco/annotations/person_keypoints_train2017.json'
@@ -100,16 +102,23 @@ def augment_heatmap(x, y, v, heatmap_half, f, a, s, tx, ty):
     return x, y, v
 
 
-# return ground truth heatmap of a training sample (fixed-sized square-shaped, can be augmented)
-def get_heatmap(keypoint, augment=True):
-    # heatmap dimension is (number of keypoints)*(heatmap size)*(heatmap size)
-    x0, y0, w, h = tuple(keypoint.get('bbox'))
-    heatmap = np.empty((total_keypoints, heatmap_size, heatmap_size), dtype='float32')
+# return parameters for an augmentation
+def get_augment_parameters(flip, scale, rotate, translate):
+    # random flip, rotation, scaling, translation
+    f = random.random() < flip
+    a = random.uniform(-rotate, rotate) * pi / 180
+    s = random.uniform(scale, 1 / scale)
+    tx = random.uniform(-translate, translate)
+    ty = random.uniform(-translate, translate)
+    return f, a, s, tx, ty
 
-    # keypoints location (x, y) and visibility (v)
+
+# return coordinates of keypoints in the heatmap and visibility
+def get_coordinates_visibility(x0, y0, w, h, keypoint):
+    # keypoints location (x, y) and visibility (v, 0 invisible, 1 visible)
     x = np.array(keypoint.get('keypoints')[0::3])
     y = np.array(keypoint.get('keypoints')[1::3])
-    v = np.array(keypoint.get('keypoints')[2::3])
+    v = np.array(keypoint.get('keypoints')[2::3]).clip(0, 1)
 
     # calculate the scaling
     heatmap_half = heatmap_size / 2
@@ -120,16 +129,45 @@ def get_heatmap(keypoint, augment=True):
         x = (x - x0) / w * heatmap_size
         y = heatmap_half - h / w * heatmap_half + (y - y0) / w * heatmap_size
 
+    return x, y, v
+
+
+# return coordinates of keypoints in the heatmap and visibility with augmentation
+def get_augmented_coordinates_visibility(keypoint):
+    # coordinates and visibility before augmentation
+    x0, y0, w, h = tuple(keypoint.get('bbox'))
+    x, y, v = get_coordinates_visibility(x0, y0, w, h, keypoint)
+
+    # random flip, rotation, scaling, translation
+    f, a, s, tx, ty = get_augment_parameters(flip, scale, rotate, translate)
+    x, y, v = augment_heatmap(x, y, v, heatmap_size / 2, f, a, s, tx, ty)
+
+    # concatenate the coordinates and visibility
+    return np.concatenate([x, y]), v
+
+
+# seperate coordinates and visibility from two arrays
+def result_to_coordinates_visibility(xy, v):
+    x = xy[0:total_keypoints]
+    y = xy[total_keypoints:2 * total_keypoints]
+    v = (np.sign(v) + 1) / 2
+    return x, y, v
+
+
+# return ground truth heatmap of a training sample (fixed-sized square-shaped, can be augmented)
+def get_heatmap(keypoint, augment=True):
+    # heatmap dimension is (number of keypoints)*(heatmap size)*(heatmap size)
+    x0, y0, w, h = tuple(keypoint.get('bbox'))
+    heatmap = np.empty((total_keypoints, heatmap_size, heatmap_size), dtype='float32')
+
+    # keypoints location (x, y) and visibility (v)
+    x, y, v = get_coordinates_visibility(x0, y0, w, h, keypoint)
+
     # do heatmap augmentation
     if augment:
         # random flip, rotation, scaling, translation
-        f = random.random() < flip
-        a = random.uniform(-rotate, rotate) * pi / 180
-        s = random.uniform(scale, 1 / scale)
-        tx = random.uniform(-translate, translate)
-        ty = random.uniform(-translate, translate)
-
-        x, y, v = augment_heatmap(x, y, v, heatmap_half, f, a, s, tx, ty)
+        f, a, s, tx, ty = get_augment_parameters(flip, scale, rotate, translate)
+        x, y, v = augment_heatmap(x, y, v, heatmap_size / 2, f, a, s, tx, ty)
 
     for i in range(total_keypoints):
         # labeled keypoints' v > 0
@@ -151,31 +189,16 @@ def get_full_image_heatmap(image, keypoints, augment=True):
 
     if augment:
         # random flip, rotation, scaling, translation
-        f = random.random() < flip
-        a = random.uniform(-rotate, rotate) * pi / 180
-        s = random.uniform(scale, 1 / scale)
-        tx = random.uniform(-translate, translate)
-        ty = random.uniform(-translate, translate)
+        f, a, s, tx, ty = get_augment_parameters(flip, scale, rotate, translate)
 
     # create individual heatmaps
     for j, keypoint in enumerate(keypoints, 0):
         # keypoints location (x, y) and visibility (v)
-        x = np.array(keypoint.get('keypoints')[0::3])
-        y = np.array(keypoint.get('keypoints')[1::3])
-        v = np.array(keypoint.get('keypoints')[2::3])
-
-        # calculate the scaling
-        heatmap_half = heatmap_size / 2
-        if h > w:
-            x = heatmap_half - w / h * heatmap_half + x / h * heatmap_size
-            y = y / h * heatmap_size
-        else:
-            x = x / w * heatmap_size
-            y = heatmap_half - h / w * heatmap_half + y / w * heatmap_size
+        x, y, v = get_coordinates_visibility(0, 0, w, h, keypoint)
 
         # do heatmap augmentation
         if augment:
-            x, y, v = augment_heatmap(x, y, v, heatmap_half, f, a, s, tx, ty)
+            x, y, v = augment_heatmap(x, y, v, heatmap_size / 2, f, a, s, tx, ty)
 
         for i in range(total_keypoints):
             # labeled keypoints' v > 0
@@ -252,6 +275,26 @@ def plot_heatmap(heatmap, skeleton=None, image_path=None, caption=None, only_ske
         plt.xlabel(caption)
 
 
+# plot a pose
+def plot_pose(x, y, v, skeleton, caption=None):
+    # visible keypoints
+    keypoint_show = np.arange(total_keypoints)[v > 0]
+
+    # visible skeleton
+    skeleton = skeleton[0:17]
+    x_skeleton = x[skeleton]
+    y_skeleton = y[skeleton]
+    skeleton_show = [i for i in range(len(skeleton)) if (v[skeleton[i]] > 0).all()]
+
+    # plot keypoints and skeleton
+    plt.imshow(np.ones((64, 64, 3), 'float32'))
+    [plt.plot(x_skeleton[i], y_skeleton[i], c=skeleton_colors[i], linewidth=5) for i in skeleton_show]
+    [plt.plot(x[i], y[i], 'o', c=keypoint_colors[i], markersize=10, markeredgecolor='k', markeredgewidth=1) for i in
+     keypoint_show]
+    plt.title('pose')
+    plt.xlabel(caption)
+
+
 # return the caption encoding
 def get_caption_vector(text_model, caption):
     return text_model.get_sentence_vector(caption.replace('\n', '').lower()) * encoding_weight
@@ -266,12 +309,16 @@ def get_noise_tensor(number):
 # a dataset that constructs heatmaps and optional matching caption encodings tensors on the fly
 class HeatmapDataset(torch.utils.data.Dataset):
     # a dataset contains keypoints and captions, can add sentence encoding
-    def __init__(self, coco_keypoint, coco_caption, single_person=False, text_model=None, full_image=False):
+    def __init__(self, coco_keypoint, coco_caption, single_person=False, text_model=None, full_image=False,
+                 for_regression=False):
 
         # get all containing 'person' image ids
         image_ids = coco_keypoint.getImgIds()
 
         self.with_vector = (text_model is not None)
+        self.for_regression = for_regression
+        if for_regression:
+            full_image = False
         self.full_image = full_image
         self.dataset = []
 
@@ -322,14 +369,22 @@ class HeatmapDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, index):
         data = self.dataset[index]
+        item = dict()
 
-        # change heatmap range from [0,1] to[-1,1]
-        heatmap = torch.tensor(self.get_heatmap(data) * 2 - 1, dtype=torch.float32)
+        if self.for_regression:
+            xy, v = get_augmented_coordinates_visibility(data.get('keypoint'))
+            item['coordinates'] = torch.tensor(xy, dtype=torch.float32)
+            item['visibility'] = torch.tensor(v, dtype=torch.float32)
+        else:
+            # change heatmap range from [0,1] to[-1,1]
+            item['heatmap'] = torch.tensor(self.get_heatmap(data) * 2 - 1, dtype=torch.float32)
+
         if self.with_vector:
             # randomly select from all matching captions
-            vector = torch.tensor(random.choice(data.get('vector')), dtype=torch.float32).unsqueeze_(-1).unsqueeze_(-1)
-            return {'heatmap': heatmap, 'vector': vector}
-        return {'heatmap': heatmap}
+            item['vector'] = torch.tensor(random.choice(data.get('vector')), dtype=torch.float32)
+            if not self.for_regression:
+                item['vector'].unsqueeze_(-1).unsqueeze_(-1)
+        return item
 
     # get a batch of random caption sentence vectors from the whole dataset
     def get_random_caption_tensor(self, number):
@@ -341,9 +396,12 @@ class HeatmapDataset(torch.utils.data.Dataset):
                 vector = random.choice(random.choice(self.dataset).get('vector'))
                 vector_tensor[i] = torch.tensor(vector, dtype=torch.float32)
 
-        return vector_tensor.unsqueeze_(-1).unsqueeze_(-1)
+        if self.for_regression:
+            return vector_tensor
+        else:
+            return vector_tensor.unsqueeze_(-1).unsqueeze_(-1)
 
-    # get a batch of random caption from the whole dataset
+    # get a batch of random heatmaps and captions from the whole dataset
     def get_random_heatmap_with_caption(self, number):
         caption = []
         heatmap = torch.empty((number, total_keypoints, heatmap_size, heatmap_size), dtype=torch.float32)
@@ -355,6 +413,22 @@ class HeatmapDataset(torch.utils.data.Dataset):
             caption.append(random.choice(data.get('caption')).get('caption'))
 
         return {'heatmap': heatmap, 'caption': caption}
+
+    # get a batch of random coordinates and captions from the whole dataset
+    def get_random_coordinates_visibility_with_caption(self, number):
+        caption = []
+        coordinates = torch.empty((number, total_keypoints * 2), dtype=torch.float32)
+        visibility = torch.empty((number, total_keypoints), dtype=torch.float32)
+
+        for i in range(number):
+            # randomly select from all images
+            data = random.choice(self.dataset)
+            xy, v = get_augmented_coordinates_visibility(data.get('keypoint'))
+            coordinates[i] = torch.tensor(xy, dtype=torch.float32)
+            visibility[i] = torch.tensor(v, dtype=torch.float32)
+            caption.append(random.choice(data.get('caption')).get('caption'))
+
+        return {'coordinates': coordinates, 'visibility': visibility, 'caption': caption}
 
     # get a batch of random interpolated caption sentence vectors from the whole dataset
     def get_interpolated_caption_tensor(self, number):
@@ -370,7 +444,10 @@ class HeatmapDataset(torch.utils.data.Dataset):
                 interpolated_vector = beta * vector + (1 - beta) * vector2
                 vector_tensor[i] = torch.tensor(interpolated_vector, dtype=torch.float32)
 
-        return vector_tensor.unsqueeze_(-1).unsqueeze_(-1)
+        if self.for_regression:
+            return vector_tensor
+        else:
+            return vector_tensor.unsqueeze_(-1).unsqueeze_(-1)
 
 
 # generator given noise input
@@ -440,6 +517,30 @@ class Discriminator(nn.Module):
 
     def forward(self, input_heatmap):
         return self.third(self.second(self.main(input_heatmap)))
+
+
+# regression given text encoding outputting keypoint coordinates
+class Regression_xy(nn.Module):
+    def __init__(self):
+        super(Regression_xy, self).__init__()
+
+        # several layers of convolution and leaky ReLu
+        self.main = nn.Linear(sentence_vector_size, total_keypoints * 2, bias=True)
+
+    def forward(self, input_vector):
+        return self.main(input_vector)
+
+
+# regression given text encoding outputting keypoint visibility
+class Regression_v(nn.Module):
+    def __init__(self):
+        super(Regression_v, self).__init__()
+
+        # several layers of convolution and leaky ReLu
+        self.main = nn.Linear(sentence_vector_size, total_keypoints, bias=True)
+
+    def forward(self, input_vector):
+        return self.main(input_vector)
 
 
 # custom weights initialization called on net_g and net_d
@@ -586,11 +687,15 @@ def one_nearest_neighbor(heatmap_max_index_list, heatmap_max_index_list2):
     count = 0
     for i in range(size):
         # a heatmap from the first list
-        if nearest_neighbor(heatmap_max_index_list[i], heatmap_max_index_list[0:i] + heatmap_max_index_list[i + 1:]) < nearest_neighbor(heatmap_max_index_list[i], heatmap_max_index_list2):
+        if nearest_neighbor(heatmap_max_index_list[i],
+                            heatmap_max_index_list[0:i] + heatmap_max_index_list[i + 1:]) < nearest_neighbor(
+            heatmap_max_index_list[i], heatmap_max_index_list2):
             count = count + 1
 
         # a heatmap from the second list
-        if nearest_neighbor(heatmap_max_index_list2[i], heatmap_max_index_list2[0:i] + heatmap_max_index_list2[i + 1:]) < nearest_neighbor(heatmap_max_index_list2[i], heatmap_max_index_list):
+        if nearest_neighbor(heatmap_max_index_list2[i],
+                            heatmap_max_index_list2[0:i] + heatmap_max_index_list2[i + 1:]) < nearest_neighbor(
+            heatmap_max_index_list2[i], heatmap_max_index_list):
             count = count + 1
 
     # accuracy

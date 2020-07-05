@@ -18,14 +18,14 @@ epoch = 200
 # gan: k = 1, beta_1 = 0.5, beta_2 = 0.999, lr = 0.0005, epoch = 50
 # wgan: k = 5, beta_1 = 0, beta_2 = 0.9, lr = 0.0001, c = 0.01, epoch = 200
 # wgan-gp: k = 5, beta_1 = 0, beta_2 = 0.9, lr = 0.0001, lamb = 10, epoch = 200
-# wgan-lp: k = 5, beta_1 = 0, beta_2 = 0.9, lr = 0.0001, lamb = 10, epoch = 200
+# wgan-lp: k = 5, beta_1 = 0, beta_2 = 0.9, lr = 0.0001, lamb = 150, epoch = 200
 algorithm = 'wgan-lp'
 
 # weight clipping (WGAN)
 c = 0.01
 
 # penalty coefficient (Lipschitz Penalty or Gradient Penalty)
-lamb = 10
+lamb = 150
 
 # train discriminator k times before training generator
 k = 5
