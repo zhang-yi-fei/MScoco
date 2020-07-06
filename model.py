@@ -10,8 +10,7 @@ from math import sin, cos, pi
 
 generator_path = 'models/generator'
 discriminator_path = 'models/discriminator'
-regression_xy_path = 'models/regression_xy'
-regression_v_path = 'models/regression_v'
+regression_path = 'models/regression'
 image_folder = '/media/data/yzhang2/coco/train/coco/images/'
 caption_path = '/media/data/yzhang2/coco/train/coco/annotations/captions_train2017.json'
 keypoint_path = '/media/data/yzhang2/coco/train/coco/annotations/person_keypoints_train2017.json'
@@ -55,6 +54,9 @@ beta = 0.5
 # numbers of channels of the convolutions
 convolution_channel_g = [256, 128, 64, 32]
 convolution_channel_d = [32, 64, 128, 256]
+
+# hidden layers
+hidden = [250, 200, 150, 100]
 
 noise_size = 128
 g_input_size = noise_size + compress_size
@@ -114,7 +116,7 @@ def get_augment_parameters(flip, scale, rotate, translate):
 
 
 # return coordinates of keypoints in the heatmap and visibility
-def get_coordinates_visibility(x0, y0, w, h, keypoint):
+def get_coordinates(x0, y0, w, h, keypoint):
     # keypoints location (x, y) and visibility (v, 0 invisible, 1 visible)
     x = np.array(keypoint.get('keypoints')[0::3])
     y = np.array(keypoint.get('keypoints')[1::3])
@@ -133,24 +135,24 @@ def get_coordinates_visibility(x0, y0, w, h, keypoint):
 
 
 # return coordinates of keypoints in the heatmap and visibility with augmentation
-def get_augmented_coordinates_visibility(keypoint):
+def get_augmented_coordinates(keypoint):
     # coordinates and visibility before augmentation
     x0, y0, w, h = tuple(keypoint.get('bbox'))
-    x, y, v = get_coordinates_visibility(x0, y0, w, h, keypoint)
+    x, y, v = get_coordinates(x0, y0, w, h, keypoint)
 
     # random flip, rotation, scaling, translation
     f, a, s, tx, ty = get_augment_parameters(flip, scale, rotate, translate)
     x, y, v = augment_heatmap(x, y, v, heatmap_size / 2, f, a, s, tx, ty)
 
     # concatenate the coordinates and visibility
-    return np.concatenate([x, y]), v
+    return np.concatenate([x, y, v])
 
 
-# seperate coordinates and visibility from two arrays
-def result_to_coordinates_visibility(xy, v):
-    x = xy[0:total_keypoints]
-    y = xy[total_keypoints:2 * total_keypoints]
-    v = (np.sign(v) + 1) / 2
+# seperate coordinates and visibility from an array
+def result_to_coordinates(result):
+    x = result[0:total_keypoints]
+    y = result[total_keypoints:2 * total_keypoints]
+    v = (np.sign(result[2 * total_keypoints:3 * total_keypoints]) + 1) / 2
     return x, y, v
 
 
@@ -161,7 +163,7 @@ def get_heatmap(keypoint, augment=True):
     heatmap = np.empty((total_keypoints, heatmap_size, heatmap_size), dtype='float32')
 
     # keypoints location (x, y) and visibility (v)
-    x, y, v = get_coordinates_visibility(x0, y0, w, h, keypoint)
+    x, y, v = get_coordinates(x0, y0, w, h, keypoint)
 
     # do heatmap augmentation
     if augment:
@@ -194,7 +196,7 @@ def get_full_image_heatmap(image, keypoints, augment=True):
     # create individual heatmaps
     for j, keypoint in enumerate(keypoints, 0):
         # keypoints location (x, y) and visibility (v)
-        x, y, v = get_coordinates_visibility(0, 0, w, h, keypoint)
+        x, y, v = get_coordinates(0, 0, w, h, keypoint)
 
         # do heatmap augmentation
         if augment:
@@ -372,9 +374,7 @@ class HeatmapDataset(torch.utils.data.Dataset):
         item = dict()
 
         if self.for_regression:
-            xy, v = get_augmented_coordinates_visibility(data.get('keypoint'))
-            item['coordinates'] = torch.tensor(xy, dtype=torch.float32)
-            item['visibility'] = torch.tensor(v, dtype=torch.float32)
+            item['coordinates'] = torch.tensor(get_augmented_coordinates(data.get('keypoint')), dtype=torch.float32)
         else:
             # change heatmap range from [0,1] to[-1,1]
             item['heatmap'] = torch.tensor(self.get_heatmap(data) * 2 - 1, dtype=torch.float32)
@@ -415,20 +415,17 @@ class HeatmapDataset(torch.utils.data.Dataset):
         return {'heatmap': heatmap, 'caption': caption}
 
     # get a batch of random coordinates and captions from the whole dataset
-    def get_random_coordinates_visibility_with_caption(self, number):
+    def get_random_coordinates_with_caption(self, number):
         caption = []
-        coordinates = torch.empty((number, total_keypoints * 2), dtype=torch.float32)
-        visibility = torch.empty((number, total_keypoints), dtype=torch.float32)
+        coordinates = torch.empty((number, total_keypoints * 3), dtype=torch.float32)
 
         for i in range(number):
             # randomly select from all images
             data = random.choice(self.dataset)
-            xy, v = get_augmented_coordinates_visibility(data.get('keypoint'))
-            coordinates[i] = torch.tensor(xy, dtype=torch.float32)
-            visibility[i] = torch.tensor(v, dtype=torch.float32)
+            coordinates[i] = torch.tensor(get_augmented_coordinates(data.get('keypoint')), dtype=torch.float32)
             caption.append(random.choice(data.get('caption')).get('caption'))
 
-        return {'coordinates': coordinates, 'visibility': visibility, 'caption': caption}
+        return {'coordinates': coordinates, 'caption': caption}
 
     # get a batch of random interpolated caption sentence vectors from the whole dataset
     def get_interpolated_caption_tensor(self, number):
@@ -520,24 +517,22 @@ class Discriminator(nn.Module):
 
 
 # regression given text encoding outputting keypoint coordinates
-class Regression_xy(nn.Module):
+class Regression(nn.Module):
     def __init__(self):
-        super(Regression_xy, self).__init__()
+        super(Regression, self).__init__()
 
         # several layers of convolution and leaky ReLu
-        self.main = nn.Linear(sentence_vector_size, total_keypoints * 2, bias=True)
-
-    def forward(self, input_vector):
-        return self.main(input_vector)
-
-
-# regression given text encoding outputting keypoint visibility
-class Regression_v(nn.Module):
-    def __init__(self):
-        super(Regression_v, self).__init__()
-
-        # several layers of convolution and leaky ReLu
-        self.main = nn.Linear(sentence_vector_size, total_keypoints, bias=True)
+        self.main = nn.Sequential(
+            nn.Linear(sentence_vector_size, hidden[0], bias=True),
+            nn.ReLU(),
+            nn.Linear(hidden[0], hidden[1], bias=True),
+            nn.ReLU(),
+            nn.Linear(hidden[1], hidden[2], bias=True),
+            nn.ReLU(),
+            nn.Linear(hidden[2], hidden[3], bias=True),
+            nn.ReLU(),
+            nn.Linear(hidden[3], total_keypoints * 3, bias=True)
+        )
 
     def forward(self, input_vector):
         return self.main(input_vector)
