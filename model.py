@@ -10,7 +10,6 @@ from math import sin, cos, pi
 
 generator_path = 'models/generator'
 discriminator_path = 'models/discriminator'
-regression_path = 'models/regression'
 image_folder = '/media/data/yzhang2/coco/train/coco/images/'
 caption_path = '/media/data/yzhang2/coco/train/coco/annotations/captions_train2017.json'
 keypoint_path = '/media/data/yzhang2/coco/train/coco/annotations/person_keypoints_train2017.json'
@@ -56,7 +55,13 @@ convolution_channel_g = [256, 128, 64, 32]
 convolution_channel_d = [32, 64, 128, 256]
 
 # hidden layers
-hidden = [250, 200, 150, 100]
+hidden = [250, 200]
+
+# coordinate scaling
+factor = 20
+
+# visible threshold
+v_threshold = 0.8
 
 noise_size = 128
 g_input_size = noise_size + compress_size
@@ -131,6 +136,10 @@ def get_coordinates(x0, y0, w, h, keypoint):
         x = (x - x0) / w * heatmap_size
         y = heatmap_half - h / w * heatmap_half + (y - y0) / w * heatmap_size
 
+    # set invisible keypoint coordinates as (0,0)
+    x[v < 1] = 0
+    y[v < 1] = 0
+
     return x, y, v
 
 
@@ -144,6 +153,10 @@ def get_augmented_coordinates(keypoint):
     f, a, s, tx, ty = get_augment_parameters(flip, scale, rotate, translate)
     x, y, v = augment_heatmap(x, y, v, heatmap_size / 2, f, a, s, tx, ty)
 
+    # set invisible keypoint coordinates as (0,0)
+    x[v < 1] = 0
+    y[v < 1] = 0
+
     # concatenate the coordinates and visibility
     return np.concatenate([x, y, v])
 
@@ -152,7 +165,7 @@ def get_augmented_coordinates(keypoint):
 def result_to_coordinates(result):
     x = result[0:total_keypoints]
     y = result[total_keypoints:2 * total_keypoints]
-    v = (np.sign(result[2 * total_keypoints:3 * total_keypoints]) + 1) / 2
+    v = (np.sign(result[2 * total_keypoints:3 * total_keypoints] - v_threshold) + 1) / 2
     return x, y, v
 
 
@@ -516,26 +529,47 @@ class Discriminator(nn.Module):
         return self.third(self.second(self.main(input_heatmap)))
 
 
-# regression given text encoding outputting keypoint coordinates
-class Regression(nn.Module):
+# generator given noise and sentence input (regression)
+class Generator_R(nn.Module):
     def __init__(self):
-        super(Regression, self).__init__()
+        super(Generator_R, self).__init__()
 
-        # several layers of convolution and leaky ReLu
+        # several layers of FC and ReLu
         self.main = nn.Sequential(
-            nn.Linear(sentence_vector_size, hidden[0], bias=True),
-            nn.ReLU(),
+            nn.Linear(noise_size + sentence_vector_size, hidden[0], bias=True),
+            nn.ReLU(True),
             nn.Linear(hidden[0], hidden[1], bias=True),
-            nn.ReLU(),
-            nn.Linear(hidden[1], hidden[2], bias=True),
-            nn.ReLU(),
-            nn.Linear(hidden[2], hidden[3], bias=True),
-            nn.ReLU(),
-            nn.Linear(hidden[3], total_keypoints * 3, bias=True)
+            nn.ReLU(True),
+            nn.Linear(hidden[1], total_keypoints * 3, bias=True)
+        )
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, noise_vector, sentence_vector):
+        output = self.main(torch.cat((noise_vector, sentence_vector), 1))
+        return torch.cat(
+            (output[:, 0:total_keypoints * 2] * factor,
+             self.sigmoid(output[:, total_keypoints * 2:total_keypoints * 3])),
+            1)
+
+
+# discriminator given coordinates and sentence input (regression)
+class Discriminator_R(nn.Module):
+    def __init__(self):
+        super(Discriminator_R, self).__init__()
+
+        # several layers of FC and ReLu
+        self.main = nn.Sequential(
+            nn.Linear(total_keypoints * 3 + sentence_vector_size, hidden[0], bias=True),
+            nn.ReLU(True),
+            nn.Linear(hidden[0], hidden[1], bias=True),
+            nn.ReLU(True),
+            nn.Linear(hidden[1], 1, bias=True)
         )
 
-    def forward(self, input_vector):
-        return self.main(input_vector)
+    def forward(self, input_coordinates, sentence_vector):
+        input = torch.cat((input_coordinates[:, 0:total_keypoints * 2] / factor,
+                           input_coordinates[:, total_keypoints * 2:total_keypoints * 3], sentence_vector), 1)
+        return self.main(input)
 
 
 # custom weights initialization called on net_g and net_d
