@@ -634,10 +634,19 @@ class Discriminator2(Discriminator):
 def heatmap_to_max_index(heatmap):
     max_index = np.array([np.unravel_index(np.argmax(h), h.shape) for h in heatmap])
 
-    # set the index of heatmap below threshold to [0,0]
+    # set the index of heatmap below threshold to the middle
     for i in range(len(heatmap)):
         if heatmap[i][tuple(max_index[i])] < heatmap_threshold:
             max_index[i][:] = heatmap_size / 2
+    return max_index
+
+
+# get max index of a pose
+def coordinates_to_max_index(x, y, v):
+    max_index = np.array([x, y]).transpose()
+
+    # set the invisible keypoints to the middle
+    max_index[v < 1] = [heatmap_size / 2, heatmap_size / 2]
     return max_index
 
 
